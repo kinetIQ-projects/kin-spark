@@ -36,12 +36,12 @@ class Settings(BaseSettings):
     # LLM
     # ==========================================================================
     google_ai_api_key: str  # Gemini 3 Flash
-    anthropic_api_key: str | None = None  # Fallback — Claude Sonnet
+    moonshot_api_key: str | None = None  # Fallback — Kimi K2.5
     groq_api_key: str | None = None  # Pre-flight — Groq Llama
 
     # Model identifiers (LiteLLM format)
     spark_primary_model: str = "gemini/gemini-3-flash-preview"
-    spark_fallback_model: str = "claude-sonnet-4-5-20250929"
+    spark_fallback_model: str = "moonshot/kimi-k2.5"
     spark_preflight_model: str = "groq/llama-3.1-8b-instant"
 
     # ==========================================================================

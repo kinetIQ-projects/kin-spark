@@ -25,8 +25,8 @@ def _get_api_key(model: str) -> str | None:
     """Resolve API key from model identifier."""
     if model.startswith("gemini/"):
         return settings.google_ai_api_key
-    if model.startswith("claude") or model.startswith("anthropic"):
-        return settings.anthropic_api_key
+    if model.startswith("moonshot/"):
+        return settings.moonshot_api_key
     if model.startswith("groq/"):
         return settings.groq_api_key
     return None
