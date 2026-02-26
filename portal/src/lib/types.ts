@@ -127,3 +127,52 @@ export interface DashboardTimeseries {
 }
 
 export type DateRange = 7 | 30 | 90;
+
+// ── Knowledge ───────────────────────────────────────────────────
+
+export type KnowledgeCategory =
+  | "company"
+  | "product"
+  | "competitor"
+  | "legal"
+  | "team"
+  | "fun";
+
+export interface KnowledgeItem {
+  id: string;
+  client_id: string;
+  title: string;
+  content: string;
+  category: KnowledgeCategory;
+  subcategory: string | null;
+  priority: number;
+  active: boolean;
+  embedding_model: string | null;
+  content_hash: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgeCreate {
+  title: string;
+  content: string;
+  category: KnowledgeCategory;
+  subcategory?: string;
+  priority?: number;
+  active?: boolean;
+}
+
+export interface KnowledgeUpdate {
+  title?: string;
+  content?: string;
+  category?: KnowledgeCategory;
+  subcategory?: string;
+  priority?: number;
+  active?: boolean;
+}
+
+export interface KnowledgeStats {
+  total_items: number;
+  active_items: number;
+  categories: Record<string, number>;
+}

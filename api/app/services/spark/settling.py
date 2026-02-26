@@ -16,25 +16,43 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Path to the core template
-_TEMPLATE_PATH = (
-    Path(__file__).resolve().parents[3] / "orientations" / "spark" / "core.md"
-)
+# Base path for orientation templates
+_ORIENTATIONS_DIR = Path(__file__).resolve().parents[3] / "orientations" / "spark"
 
-# Cache the template in memory after first read
-_template_cache: str | None = None
+# Cache templates in memory after first read (keyed by template name)
+_template_cache: dict[str, str] = {}
 
 
-def _load_template() -> str:
-    """Load the core Spark template from disk (cached)."""
-    global _template_cache
-    if _template_cache is None:
-        _template_cache = _TEMPLATE_PATH.read_text(encoding="utf-8")
-    return _template_cache
+def _load_template(template_name: str = "core") -> str:
+    """Load a Spark orientation template from disk (cached).
+
+    Falls back to "core" if the requested template is not found.
+    """
+    if template_name in _template_cache:
+        return _template_cache[template_name]
+
+    path = _ORIENTATIONS_DIR / f"{template_name}.md"
+    try:
+        content = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        if template_name != "core":
+            logger.warning(
+                "Orientation template '%s' not found, falling back to 'core'",
+                template_name,
+            )
+            return _load_template("core")
+        raise
+
+    _template_cache[template_name] = content
+    return content
 
 
 def _format_doc_context(chunks: list[dict[str, Any]]) -> str:
-    """Format retrieved document chunks into a context section."""
+    """Format retrieved document chunks into a context section.
+
+    Knowledge items (with category field) get category/subcategory attribution.
+    Document chunks (no category field) get plain title + relevance.
+    """
     if not chunks:
         return "No specific reference material available for this query."
 
@@ -43,9 +61,20 @@ def _format_doc_context(chunks: list[dict[str, Any]]) -> str:
         title = chunk.get("title") or "Reference"
         content = chunk.get("content", "")
         similarity = chunk.get("similarity")
+        category = chunk.get("category")
+
+        # Build header with optional category attribution
         header = f"[{i}] {title}"
-        if similarity is not None:
+        if category:
+            subcategory = chunk.get("subcategory")
+            cat_label = f"{category} / {subcategory}" if subcategory else category
+            if similarity is not None:
+                header += f" ({cat_label} — relevance: {similarity:.0%})"
+            else:
+                header += f" ({cat_label})"
+        elif similarity is not None:
             header += f" (relevance: {similarity:.0%})"
+
         parts.append(f"{header}\n{content}")
 
     return "\n\n---\n\n".join(parts)
@@ -123,7 +152,8 @@ def build_system_prompt(
     The core template handles the 80% (universal behavior).
     settling_config provides the 20% (per-client personality).
     """
-    template = _load_template()
+    template_name = settling_config.get("orientation_template", "core")
+    template = _load_template(template_name)
 
     company_name = settling_config.get("company_name", "our company")
     company_description = settling_config.get("company_description", "")
@@ -183,6 +213,5 @@ def build_system_prompt(
 
 
 def clear_template_cache() -> None:
-    """Clear the cached template (for testing or hot-reload)."""
-    global _template_cache
-    _template_cache = None
+    """Clear the cached templates (for testing or hot-reload)."""
+    _template_cache.clear()

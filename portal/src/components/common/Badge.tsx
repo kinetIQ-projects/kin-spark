@@ -72,3 +72,20 @@ export function LeadStatusBadge({ status }: { status: string }) {
     </Badge>
   );
 }
+
+const knowledgeCategoryVariants: Record<string, BadgeVariant> = {
+  company: "blue",
+  product: "green",
+  competitor: "yellow",
+  legal: "red",
+  team: "purple",
+  fun: "default",
+};
+
+export function KnowledgeCategoryBadge({ category }: { category: string }) {
+  return (
+    <Badge variant={knowledgeCategoryVariants[category] ?? "default"}>
+      {category}
+    </Badge>
+  );
+}

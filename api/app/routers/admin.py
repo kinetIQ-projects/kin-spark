@@ -8,6 +8,12 @@ Endpoints:
   GET  /spark/admin/leads                 — List leads (filterable)
   PATCH /spark/admin/leads/{id}           — Update lead status/notes
   GET  /spark/admin/leads/export          — CSV export
+  GET  /spark/admin/knowledge             — List knowledge items (filterable)
+  GET  /spark/admin/knowledge/stats       — Knowledge base stats
+  POST /spark/admin/knowledge             — Create knowledge item
+  GET  /spark/admin/knowledge/{id}        — Single knowledge item
+  PATCH /spark/admin/knowledge/{id}       — Update knowledge item
+  DELETE /spark/admin/knowledge/{id}      — Delete knowledge item
   GET  /spark/admin/metrics/summary       — Dashboard KPI summary
   GET  /spark/admin/metrics/timeseries    — Dashboard charts data
 """
@@ -43,8 +49,15 @@ from app.models.dashboard import (
     SentimentBucket,
     TimeseriesPoint,
 )
+from app.models.knowledge import (
+    AdminKnowledgeCreate,
+    AdminKnowledgeItem,
+    AdminKnowledgeStats,
+    AdminKnowledgeUpdate,
+)
 from app.models.spark import SparkClient
 from app.services.spark.admin_auth import verify_admin_jwt
+from app.services.spark import knowledge as knowledge_svc
 from app.services.spark.rate_limiter import get_rate_limiter
 from app.services.supabase import get_supabase_client
 
@@ -477,6 +490,163 @@ async def update_lead(
 
     updated = result.data[0] if result.data else existing.data[0]
     return AdminLeadListItem(**updated)
+
+
+# =============================================================================
+# KNOWLEDGE
+# =============================================================================
+
+_KNOWLEDGE_SORT_FIELDS = {"priority", "updated_at", "title", "category"}
+
+
+@router.get("/knowledge")
+async def list_knowledge(
+    request: Request,
+    _rate: None = Depends(_admin_rate_limit),
+    client: SparkClient = Depends(verify_admin_jwt),
+    limit: int = Query(default=50, le=200),
+    offset: int = Query(default=0, ge=0),
+    category: str | None = Query(default=None),
+    active: bool | None = Query(default=None),
+    search: str | None = Query(default=None),
+    sort: str | None = Query(default=None),
+) -> PaginatedResponse:
+    """List knowledge items with optional filters.
+
+    Default sort: priority DESC, updated_at DESC.
+    Override via sort param (priority, updated_at, title, category).
+    """
+    sb = await get_supabase_client()
+
+    try:
+        query = (
+            sb.table("spark_knowledge_items")
+            .select("*", count="exact")
+            .eq("client_id", str(client.id))
+        )
+
+        if category:
+            query = query.eq("category", category)
+        if active is not None:
+            query = query.eq("active", active)
+        if search:
+            query = query.ilike("title", f"%{search}%")
+
+        # Sorting
+        if sort and sort in _KNOWLEDGE_SORT_FIELDS:
+            desc = sort in ("priority", "updated_at")
+            query = query.order(sort, desc=desc)
+        else:
+            query = query.order("priority", desc=True).order("updated_at", desc=True)
+
+        query = query.range(offset, offset + limit - 1)
+        result = await query.execute()
+    except Exception:
+        logger.exception("Admin: failed to list knowledge items")
+        raise HTTPException(status_code=500, detail="Failed to fetch knowledge items")
+
+    items = result.data or []
+    total = result.count if result.count is not None else len(items)
+
+    return PaginatedResponse(items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get("/knowledge/stats")
+async def get_knowledge_stats(
+    request: Request,
+    _rate: None = Depends(_admin_rate_limit),
+    client: SparkClient = Depends(verify_admin_jwt),
+) -> AdminKnowledgeStats:
+    """Category counts for admin header."""
+    stats = await knowledge_svc.get_knowledge_stats(client.id)
+    return AdminKnowledgeStats(**stats)
+
+
+@router.post("/knowledge", status_code=201)
+async def create_knowledge(
+    body: AdminKnowledgeCreate,
+    request: Request,
+    _rate: None = Depends(_admin_rate_limit),
+    client: SparkClient = Depends(verify_admin_jwt),
+) -> AdminKnowledgeItem:
+    """Create a knowledge item, embed content, return 201."""
+    row = await knowledge_svc.create_knowledge_item(
+        client_id=client.id,
+        title=body.title,
+        content=body.content,
+        category=body.category.value,
+        subcategory=body.subcategory,
+        priority=body.priority,
+        active=body.active,
+    )
+    return AdminKnowledgeItem(**row)
+
+
+@router.get("/knowledge/{item_id}")
+async def get_knowledge_item(
+    item_id: UUID,
+    request: Request,
+    _rate: None = Depends(_admin_rate_limit),
+    client: SparkClient = Depends(verify_admin_jwt),
+) -> AdminKnowledgeItem:
+    """Get a single knowledge item."""
+    sb = await get_supabase_client()
+
+    try:
+        result = await (
+            sb.table("spark_knowledge_items")
+            .select("*")
+            .eq("id", str(item_id))
+            .eq("client_id", str(client.id))
+            .limit(1)
+            .execute()
+        )
+    except Exception:
+        logger.exception("Admin: failed to fetch knowledge item")
+        raise HTTPException(status_code=500, detail="Failed to fetch knowledge item")
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Knowledge item not found")
+
+    return AdminKnowledgeItem(**result.data[0])
+
+
+@router.patch("/knowledge/{item_id}")
+async def update_knowledge(
+    item_id: UUID,
+    body: AdminKnowledgeUpdate,
+    request: Request,
+    _rate: None = Depends(_admin_rate_limit),
+    client: SparkClient = Depends(verify_admin_jwt),
+) -> AdminKnowledgeItem:
+    """Update a knowledge item (re-embeds if content changed)."""
+    updates: dict[str, Any] = {}
+    if body.title is not None:
+        updates["title"] = body.title
+    if body.content is not None:
+        updates["content"] = body.content
+    if body.category is not None:
+        updates["category"] = body.category.value
+    if body.subcategory is not None:
+        updates["subcategory"] = body.subcategory
+    if body.priority is not None:
+        updates["priority"] = body.priority
+    if body.active is not None:
+        updates["active"] = body.active
+
+    row = await knowledge_svc.update_knowledge_item(item_id, client.id, updates)
+    return AdminKnowledgeItem(**row)
+
+
+@router.delete("/knowledge/{item_id}", status_code=204)
+async def delete_knowledge(
+    item_id: UUID,
+    request: Request,
+    _rate: None = Depends(_admin_rate_limit),
+    client: SparkClient = Depends(verify_admin_jwt),
+) -> None:
+    """Hard delete a knowledge item."""
+    await knowledge_svc.delete_knowledge_item(item_id, client.id)
 
 
 # =============================================================================

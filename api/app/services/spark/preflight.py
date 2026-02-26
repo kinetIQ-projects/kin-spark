@@ -76,23 +76,40 @@ async def _branch_b_retrieval(
     message: str,
     client_id: UUID,
 ) -> list[dict[str, Any]]:
-    """Branch B: Embed query → vector search for relevant docs."""
+    """Branch B: Embed query → vector search for relevant docs + knowledge items.
+
+    Queries both match_spark_knowledge (admin-managed) and match_spark_documents
+    (ingested docs) in parallel, merges by similarity, returns top-k.
+    """
     try:
         embedding = await create_embedding(message, input_type="query")
 
         sb = await get_supabase_client()
-        result = await sb.rpc(
-            "match_spark_documents",
-            {
-                "p_client_id": str(client_id),
-                "p_query_embedding": embedding,
-                "p_match_count": settings.spark_max_doc_chunks,
-                "p_threshold": settings.spark_doc_match_threshold,
-            },
-        ).execute()
+        rpc_params = {
+            "p_client_id": str(client_id),
+            "p_query_embedding": embedding,
+            "p_match_count": settings.spark_max_doc_chunks,
+            "p_threshold": settings.spark_doc_match_threshold,
+        }
 
-        chunks = result.data or []
-        logger.debug("Spark retrieval: %d chunks for client %s", len(chunks), client_id)
+        # Query both sources in parallel
+        knowledge_result, doc_result = await asyncio.gather(
+            sb.rpc("match_spark_knowledge", rpc_params).execute(),
+            sb.rpc("match_spark_documents", rpc_params).execute(),
+        )
+
+        # Merge by similarity, return top-k
+        all_chunks = (knowledge_result.data or []) + (doc_result.data or [])
+        all_chunks.sort(key=lambda c: c.get("similarity", 0), reverse=True)
+        chunks = all_chunks[: settings.spark_max_doc_chunks]
+
+        logger.debug(
+            "Spark retrieval: %d chunks (%d knowledge, %d docs) for client %s",
+            len(chunks),
+            len(knowledge_result.data or []),
+            len(doc_result.data or []),
+            client_id,
+        )
         return chunks
     except Exception as e:
         logger.error("Spark preflight retrieval failed: %s", e)

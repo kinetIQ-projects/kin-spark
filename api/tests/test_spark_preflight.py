@@ -89,7 +89,7 @@ class TestBranchASafety:
 
 @pytest.mark.unit
 class TestBranchBRetrieval:
-    """Document retrieval via embedding + vector search."""
+    """Hybrid retrieval via embedding + vector search (knowledge + documents)."""
 
     @pytest.mark.asyncio
     async def test_returns_matching_chunks(self) -> None:
@@ -110,8 +110,54 @@ class TestBranchBRetrieval:
                 "Tell me about you", _CLIENT_ID
             )
 
-        assert len(result) == 1
+        # Both RPCs called — results merged
+        assert len(result) >= 1
         assert result[0]["content"] == "About us"
+
+    @pytest.mark.asyncio
+    async def test_queries_both_rpcs_and_merges(self) -> None:
+        """Hybrid retrieval queries both knowledge and documents, merges by similarity."""
+        knowledge_chunks = [
+            {
+                "id": "k1",
+                "content": "From knowledge",
+                "title": "KB",
+                "similarity": 0.9,
+                "category": "company",
+                "subcategory": "mission",
+            }
+        ]
+        doc_chunks = [
+            {"id": "d1", "content": "From docs", "title": "Doc", "similarity": 0.7}
+        ]
+
+        call_count = 0
+
+        async def mock_rpc_execute() -> MagicMock:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return MagicMock(data=knowledge_chunks)
+            return MagicMock(data=doc_chunks)
+
+        mock_sb = MagicMock()
+        mock_sb.rpc.return_value.execute = mock_rpc_execute
+
+        with patch.object(
+            preflight_mod, "create_embedding", AsyncMock(return_value=[0.1] * 2000)
+        ), patch.object(
+            preflight_mod, "get_supabase_client", AsyncMock(return_value=mock_sb)
+        ):
+            result = await preflight_mod._branch_b_retrieval(
+                "Tell me about you", _CLIENT_ID
+            )
+
+        # Both sources merged, sorted by similarity (0.9 before 0.7)
+        assert len(result) == 2
+        assert result[0]["similarity"] == 0.9
+        assert result[0]["content"] == "From knowledge"
+        assert result[1]["similarity"] == 0.7
+        assert result[1]["content"] == "From docs"
 
     @pytest.mark.asyncio
     async def test_returns_empty_on_error(self) -> None:
