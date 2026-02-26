@@ -117,19 +117,6 @@ async def increment_turn(conversation_id: UUID) -> int:
         minutes=settings.spark_session_timeout_minutes
     )
 
-    result = await (
-        sb.table("spark_conversations")
-        .update(
-            {
-                "turn_count": "turn_count",  # Placeholder — we read-modify-write below
-                "expires_at": new_expires.isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
-        )
-        .eq("id", str(conversation_id))
-        .execute()
-    )
-
     # Supabase doesn't support increment in update, so fetch + update
     row = await get_first_or_none(
         sb.table("spark_conversations")
