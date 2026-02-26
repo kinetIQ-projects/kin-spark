@@ -90,7 +90,12 @@ export interface ClientProfile {
   notifications_enabled: boolean;
   daily_conversation_cap: number | null;
   sessions_per_visitor_per_day: number | null;
+  settling_config: Record<string, unknown>;
   created_at: string | null;
+}
+
+export interface SettingsUpdate {
+  timezone?: string;
 }
 
 // ── Dashboard ───────────────────────────────────────────────────

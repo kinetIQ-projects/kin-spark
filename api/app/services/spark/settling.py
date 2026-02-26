@@ -12,6 +12,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from app.config import settings
 
@@ -196,9 +197,16 @@ def build_system_prompt(
     if custom_instructions:
         full_custom += f"\n{custom_instructions}"
 
-    # Timestamp — e.g. "It is Thursday, February 26, 2026 at 3:42 PM UTC."
-    now = datetime.now(timezone.utc)
-    timestamp = now.strftime("It is %A, %B %-d, %Y at %-I:%M %p UTC.")
+    # Timestamp — e.g. "It is Thursday, February 26, 2026 at 3:42 PM EST."
+    tz_name = settling_config.get("timezone", "UTC")
+    try:
+        tz = ZoneInfo(tz_name)
+    except (KeyError, ValueError):
+        logger.warning("Invalid timezone '%s' in settling_config, falling back to UTC", tz_name)
+        tz = timezone.utc
+    now = datetime.now(tz)
+    tz_abbr = now.strftime("%Z") or "UTC"
+    timestamp = now.strftime(f"It is %A, %B %-d, %Y at %-I:%M %p {tz_abbr}.")
 
     # Fill template
     prompt = template.format(

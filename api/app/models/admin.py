@@ -117,7 +117,14 @@ class AdminClientProfile(BaseModel):
     notifications_enabled: bool = False
     daily_conversation_cap: int | None = None
     sessions_per_visitor_per_day: int | None = None
+    settling_config: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime | None = None
+
+
+class AdminSettingsUpdate(BaseModel):
+    """Request body for PATCH /settings — partial settling_config update."""
+
+    timezone: str | None = None
 
 
 # =============================================================================

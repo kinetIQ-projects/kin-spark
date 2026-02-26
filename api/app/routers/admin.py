@@ -3,6 +3,7 @@ Spark Admin Router — Authenticated endpoints for the admin portal.
 
 Endpoints:
   GET  /spark/admin/me                    — Client profile
+  PATCH /spark/admin/settings             — Update settings (timezone, etc.)
   GET  /spark/admin/conversations         — List conversations (filterable)
   GET  /spark/admin/conversations/{id}    — Conversation detail + transcript
   GET  /spark/admin/leads                 — List leads (filterable)
@@ -39,6 +40,7 @@ from app.models.admin import (
     AdminLeadListItem,
     AdminLeadSummary,
     AdminLeadUpdate,
+    AdminSettingsUpdate,
     AdminTranscriptMessage,
     PaginatedResponse,
 )
@@ -133,6 +135,93 @@ async def get_profile(
         notifications_enabled=row.get("notifications_enabled", False),
         daily_conversation_cap=row.get("daily_conversation_cap"),
         sessions_per_visitor_per_day=row.get("sessions_per_visitor_per_day"),
+        settling_config=row.get("settling_config") or {},
+        created_at=row.get("created_at"),
+    )
+
+
+@router.patch("/settings")
+async def update_settings(
+    body: AdminSettingsUpdate,
+    request: Request,
+    _rate: None = Depends(_admin_rate_limit),
+    client: SparkClient = Depends(verify_admin_jwt),
+) -> AdminClientProfile:
+    """Update settling_config fields (merges into existing JSONB)."""
+    from zoneinfo import available_timezones
+
+    sb = await get_supabase_client()
+
+    # Build partial config from non-None fields
+    updates: dict[str, Any] = {}
+    if body.timezone is not None:
+        if body.timezone not in available_timezones():
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid timezone: {body.timezone}",
+            )
+        updates["timezone"] = body.timezone
+
+    if not updates:
+        # Nothing to change — return current profile
+        result = await (
+            sb.table("spark_clients")
+            .select("*")
+            .eq("id", str(client.id))
+            .limit(1)
+            .execute()
+        )
+        row = result.data[0]
+    else:
+        # Fetch current settling_config, merge, write back
+        try:
+            current = await (
+                sb.table("spark_clients")
+                .select("settling_config")
+                .eq("id", str(client.id))
+                .limit(1)
+                .execute()
+            )
+        except Exception:
+            logger.exception("Admin: failed to fetch settling_config")
+            raise HTTPException(status_code=500, detail="Failed to fetch settings")
+
+        existing_config: dict[str, Any] = (current.data[0].get("settling_config") or {}) if current.data else {}
+        merged = {**existing_config, **updates}
+
+        try:
+            result = await (
+                sb.table("spark_clients")
+                .update({"settling_config": merged})
+                .eq("id", str(client.id))
+                .execute()
+            )
+        except Exception:
+            logger.exception("Admin: failed to update settling_config")
+            raise HTTPException(status_code=500, detail="Failed to update settings")
+
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Client not found")
+
+        row = result.data[0]
+
+    return AdminClientProfile(
+        id=row["id"],
+        name=row["name"],
+        slug=row["slug"],
+        active=row.get("active", True),
+        max_turns=row.get("max_turns", 20),
+        rate_limit_rpm=row.get("rate_limit_rpm", 30),
+        accent_color=row.get("accent_color"),
+        widget_position=row.get("widget_position"),
+        widget_title=row.get("widget_title"),
+        widget_avatar_url=row.get("widget_avatar_url"),
+        greeting_message=row.get("greeting_message"),
+        notification_email=row.get("notification_email"),
+        notifications_enabled=row.get("notifications_enabled", False),
+        daily_conversation_cap=row.get("daily_conversation_cap"),
+        sessions_per_visitor_per_day=row.get("sessions_per_visitor_per_day"),
+        settling_config=row.get("settling_config") or {},
         created_at=row.get("created_at"),
     )
 
