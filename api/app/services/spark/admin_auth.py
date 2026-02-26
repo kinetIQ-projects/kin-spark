@@ -6,7 +6,7 @@ The portal sends the Supabase access token as a Bearer token.
 We verify it using Supabase's JWKS endpoint (RS256).
 
 The public key is fetched from:
-  {SUPABASE_URL}/.well-known/jwks.json
+  {SUPABASE_URL}/auth/v1/.well-known/jwks.json
 
 Cached in-process with a 1-hour TTL to avoid hitting the endpoint on every request.
 """
@@ -43,7 +43,7 @@ def _get_jwks_client() -> PyJWKClient:
     now = time.monotonic()
 
     if _jwks_client is None or (now - _jwks_client_created_at) > _JWKS_TTL_SECONDS:
-        jwks_url = f"{settings.supabase_url}/.well-known/jwks.json"
+        jwks_url = f"{settings.supabase_url}/auth/v1/.well-known/jwks.json"
         _jwks_client = PyJWKClient(jwks_url, cache_keys=True)
         _jwks_client_created_at = now
         logger.info("JWKS client initialized: %s", jwks_url)
