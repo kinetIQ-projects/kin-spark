@@ -5,6 +5,7 @@ import type {
   KnowledgeUpdate,
   KnowledgeCategory,
 } from "@/lib/types";
+import { KNOWLEDGE_CATEGORY_LABELS } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
 const CATEGORIES: KnowledgeCategory[] = [
@@ -14,6 +15,8 @@ const CATEGORIES: KnowledgeCategory[] = [
   "legal",
   "team",
   "fun",
+  "customer_profile",
+  "procedure",
 ];
 
 interface KnowledgeDetailPanelProps {
@@ -149,7 +152,7 @@ export function KnowledgeDetailPanel({
               >
                 {CATEGORIES.map((c) => (
                   <option key={c} value={c}>
-                    {c}
+                    {KNOWLEDGE_CATEGORY_LABELS[c]}
                   </option>
                 ))}
               </select>

@@ -112,6 +112,7 @@ async def process_message(
     settling_config: dict[str, Any],
     max_turns: int,
     turn_count: int,
+    client_orientation: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Process a Spark chat message. Yields SSE event strings.
 
@@ -194,6 +195,9 @@ async def process_message(
     # Get sliding window of conversation history
     history = await get_history(conversation_id, limit=settings.spark_context_turns)
 
+    # Resolve orientation: DB first, template fallback
+    orientation_text: str | None = client_orientation if client_orientation else None
+
     # Build system prompt
     system_prompt = build_system_prompt(
         settling_config=settling_config,
@@ -203,6 +207,7 @@ async def process_message(
         wind_down=wind_down,
         conversation_state=preflight.conversation_state,
         rejection_tier=preflight.rejection_tier,
+        orientation_text=orientation_text,
     )
 
     # Assemble messages for LLM

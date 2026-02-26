@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   MessageSquare,
   Users,
+  ClipboardList,
   BookOpen,
   Settings,
   X,
@@ -13,6 +14,7 @@ const navItems = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/conversations", icon: MessageSquare, label: "Conversations" },
   { to: "/leads", icon: Users, label: "Leads" },
+  { to: "/onboarding", icon: ClipboardList, label: "Onboarding" },
   { to: "/knowledge", icon: BookOpen, label: "Knowledge" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];

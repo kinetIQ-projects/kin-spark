@@ -108,6 +108,7 @@ async def spark_chat(
             settling_config=client.settling_config,
             max_turns=client.max_turns,
             turn_count=turn_count,
+            client_orientation=client.client_orientation,
         ):
             yield event
 

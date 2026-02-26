@@ -4,6 +4,10 @@ Spark Admin Router — Authenticated endpoints for the admin portal.
 Endpoints:
   GET  /spark/admin/me                    — Client profile
   PATCH /spark/admin/settings             — Update settings (timezone, etc.)
+  GET  /spark/admin/onboarding            — Get questionnaire responses
+  PATCH /spark/admin/onboarding           — Save partial/complete questionnaire
+  GET  /spark/admin/orientation           — Get client orientation text
+  PUT  /spark/admin/orientation           — Set client orientation text
   GET  /spark/admin/conversations         — List conversations (filterable)
   GET  /spark/admin/conversations/{id}    — Conversation detail + transcript
   GET  /spark/admin/leads                 — List leads (filterable)
@@ -42,6 +46,9 @@ from app.models.admin import (
     AdminLeadUpdate,
     AdminSettingsUpdate,
     AdminTranscriptMessage,
+    OnboardingUpdate,
+    OrientationResponse,
+    OrientationUpdate,
     PaginatedResponse,
 )
 from app.models.dashboard import (
@@ -136,6 +143,8 @@ async def get_profile(
         daily_conversation_cap=row.get("daily_conversation_cap"),
         sessions_per_visitor_per_day=row.get("sessions_per_visitor_per_day"),
         settling_config=row.get("settling_config") or {},
+        onboarding_data=row.get("onboarding_data") or {},
+        client_orientation=row.get("client_orientation"),
         created_at=row.get("created_at"),
     )
 
@@ -222,7 +231,160 @@ async def update_settings(
         daily_conversation_cap=row.get("daily_conversation_cap"),
         sessions_per_visitor_per_day=row.get("sessions_per_visitor_per_day"),
         settling_config=row.get("settling_config") or {},
+        onboarding_data=row.get("onboarding_data") or {},
+        client_orientation=row.get("client_orientation"),
         created_at=row.get("created_at"),
+    )
+
+
+# =============================================================================
+# ONBOARDING
+# =============================================================================
+
+
+@router.get("/onboarding")
+async def get_onboarding(
+    request: Request,
+    _rate: None = Depends(_admin_rate_limit),
+    client: SparkClient = Depends(verify_admin_jwt),
+) -> dict[str, Any]:
+    """Get current questionnaire responses."""
+    sb = await get_supabase_client()
+
+    try:
+        result = await (
+            sb.table("spark_clients")
+            .select("onboarding_data")
+            .eq("id", str(client.id))
+            .limit(1)
+            .execute()
+        )
+    except Exception:
+        logger.exception("Admin: failed to fetch onboarding data")
+        raise HTTPException(status_code=500, detail="Failed to fetch onboarding data")
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    row = result.data[0]
+    return {"onboarding_data": row.get("onboarding_data") or {}}
+
+
+@router.patch("/onboarding")
+async def update_onboarding(
+    body: OnboardingUpdate,
+    request: Request,
+    _rate: None = Depends(_admin_rate_limit),
+    client: SparkClient = Depends(verify_admin_jwt),
+) -> dict[str, Any]:
+    """Save partial or complete questionnaire responses."""
+    sb = await get_supabase_client()
+
+    # Fetch current onboarding_data
+    try:
+        current_result = await (
+            sb.table("spark_clients")
+            .select("onboarding_data")
+            .eq("id", str(client.id))
+            .limit(1)
+            .execute()
+        )
+    except Exception:
+        logger.exception("Admin: failed to fetch onboarding data for update")
+        raise HTTPException(status_code=500, detail="Failed to fetch onboarding data")
+
+    if not current_result.data:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    current: dict[str, Any] = current_result.data[0].get("onboarding_data") or {}
+
+    # Shallow merge: only non-None fields from the request body
+    update_dict = body.model_dump(exclude_none=True)
+    for key, value in update_dict.items():
+        current[key] = value
+    current["last_saved_at"] = datetime.now(timezone.utc).isoformat()
+
+    # Write merged data back
+    try:
+        result = await (
+            sb.table("spark_clients")
+            .update({"onboarding_data": current})
+            .eq("id", str(client.id))
+            .execute()
+        )
+    except Exception:
+        logger.exception("Admin: failed to update onboarding data")
+        raise HTTPException(status_code=500, detail="Failed to update onboarding data")
+
+    return {"onboarding_data": current}
+
+
+# =============================================================================
+# ORIENTATION
+# =============================================================================
+
+
+@router.get("/orientation")
+async def get_orientation(
+    request: Request,
+    _rate: None = Depends(_admin_rate_limit),
+    client: SparkClient = Depends(verify_admin_jwt),
+) -> OrientationResponse:
+    """Get client's current orientation text."""
+    sb = await get_supabase_client()
+
+    try:
+        result = await (
+            sb.table("spark_clients")
+            .select("client_orientation, settling_config")
+            .eq("id", str(client.id))
+            .limit(1)
+            .execute()
+        )
+    except Exception:
+        logger.exception("Admin: failed to fetch orientation")
+        raise HTTPException(status_code=500, detail="Failed to fetch orientation")
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    row = result.data[0]
+    settling_config: dict[str, Any] = row.get("settling_config") or {}
+    return OrientationResponse(
+        orientation=row.get("client_orientation"),
+        template_name=settling_config.get("orientation_template", "core"),
+    )
+
+
+@router.put("/orientation")
+async def set_orientation(
+    body: OrientationUpdate,
+    request: Request,
+    _rate: None = Depends(_admin_rate_limit),
+    client: SparkClient = Depends(verify_admin_jwt),
+) -> OrientationResponse:
+    """Set client's orientation text."""
+    sb = await get_supabase_client()
+
+    try:
+        result = await (
+            sb.table("spark_clients")
+            .update({"client_orientation": body.orientation})
+            .eq("id", str(client.id))
+            .execute()
+        )
+    except Exception:
+        logger.exception("Admin: failed to update orientation")
+        raise HTTPException(status_code=500, detail="Failed to update orientation")
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    row = result.data[0]
+    settling_config: dict[str, Any] = row.get("settling_config") or {}
+    return OrientationResponse(
+        orientation=body.orientation,
+        template_name=settling_config.get("orientation_template", "core"),
     )
 
 
@@ -597,7 +759,7 @@ async def list_knowledge(
     offset: int = Query(default=0, ge=0),
     category: str | None = Query(default=None),
     active: bool | None = Query(default=None),
-    search: str | None = Query(default=None),
+    search: str | None = Query(default=None, max_length=200),
     sort: str | None = Query(default=None),
 ) -> PaginatedResponse:
     """List knowledge items with optional filters.

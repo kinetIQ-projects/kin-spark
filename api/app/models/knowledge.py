@@ -21,6 +21,8 @@ class KnowledgeCategory(str, Enum):
     legal = "legal"
     team = "team"
     fun = "fun"
+    customer_profile = "customer_profile"
+    procedure = "procedure"
 
 
 class AdminKnowledgeItem(BaseModel):

@@ -8,6 +8,7 @@ import { Conversations } from "@/pages/Conversations";
 import { ConversationDetail } from "@/pages/ConversationDetail";
 import { Leads } from "@/pages/Leads";
 import { Knowledge } from "@/pages/Knowledge";
+import { Onboarding } from "@/pages/Onboarding";
 import { Settings } from "@/pages/Settings";
 
 export default function App() {
@@ -26,6 +27,7 @@ export default function App() {
           <Route path="/conversations" element={<Conversations />} />
           <Route path="/conversations/:id" element={<ConversationDetail />} />
           <Route path="/leads" element={<Leads />} />
+          <Route path="/onboarding" element={<Onboarding />} />
           <Route path="/knowledge" element={<Knowledge />} />
           <Route path="/settings" element={<Settings />} />
         </Route>

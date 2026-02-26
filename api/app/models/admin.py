@@ -118,6 +118,8 @@ class AdminClientProfile(BaseModel):
     daily_conversation_cap: int | None = None
     sessions_per_visitor_per_day: int | None = None
     settling_config: dict[str, Any] = Field(default_factory=dict)
+    onboarding_data: dict[str, Any] = Field(default_factory=dict)
+    client_orientation: str | None = None
     created_at: datetime | None = None
 
 
@@ -139,3 +141,46 @@ class PaginatedResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+# =============================================================================
+# ONBOARDING MODELS
+# =============================================================================
+
+
+class OnboardingCustomerProfile(BaseModel):
+    """Single ICP entry in the questionnaire."""
+
+    name: str = Field(default="", max_length=200)
+    description: str = Field(default="", max_length=1000)
+    signals: str = Field(default="", max_length=1000)
+    needs: str = Field(default="", max_length=1000)
+
+
+class OnboardingUpdate(BaseModel):
+    """Partial update to questionnaire responses.
+
+    All fields optional — allows saving one section at a time.
+    Shallow merge: PATCH replaces entire sections, not individual fields within.
+    """
+
+    purpose_story: dict[str, str] | None = None
+    values_culture: dict[str, str] | None = None
+    brand_voice: dict[str, str | list[str]] | None = None
+    customers: list[OnboardingCustomerProfile] | None = Field(default=None, max_length=50)
+    procedures_policies: dict[str, str] | None = None
+    additional_context: str | None = Field(default=None, max_length=5000)
+    completed_at: str | None = None
+
+
+class OrientationUpdate(BaseModel):
+    """Set client orientation text."""
+
+    orientation: str = Field(..., max_length=20000)
+
+
+class OrientationResponse(BaseModel):
+    """Response for orientation GET."""
+
+    orientation: str | None = None
+    template_name: str = "core"

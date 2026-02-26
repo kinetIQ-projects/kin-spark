@@ -10,6 +10,7 @@ import type {
   KnowledgeCategory,
   PaginatedResponse,
 } from "@/lib/types";
+import { KNOWLEDGE_CATEGORY_LABELS } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 import { Badge, KnowledgeCategoryBadge } from "@/components/common/Badge";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -26,6 +27,8 @@ const CATEGORIES: KnowledgeCategory[] = [
   "legal",
   "team",
   "fun",
+  "customer_profile",
+  "procedure",
 ];
 
 export function Knowledge() {
@@ -182,7 +185,7 @@ export function Knowledge() {
           <option value="">All categories</option>
           {CATEGORIES.map((c) => (
             <option key={c} value={c}>
-              {c}
+              {KNOWLEDGE_CATEGORY_LABELS[c]}
             </option>
           ))}
         </select>
@@ -397,7 +400,7 @@ function CreateKnowledgeModal({
               >
                 {CATEGORIES.map((c) => (
                   <option key={c} value={c}>
-                    {c}
+                    {KNOWLEDGE_CATEGORY_LABELS[c]}
                   </option>
                 ))}
               </select>

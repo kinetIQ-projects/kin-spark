@@ -26,12 +26,58 @@ _CHUNK_SIZE = 1000  # ~1000 chars per chunk
 _CHUNK_OVERLAP = 200  # 200-char overlap between chunks
 
 
+def _split_oversized_chunk(chunk: str, chunk_size: int) -> list[str]:
+    """Split an oversized chunk on sentence boundaries, then word boundaries.
+
+    1. Split on sentence endings (.!?) followed by whitespace.
+    2. Accumulate sentences into sub-chunks respecting chunk_size.
+    3. If a single sentence still exceeds chunk_size, fall back to splitting
+       at the last space before chunk_size.
+
+    Pure function — no side effects.
+    """
+    # Split on sentence boundaries
+    sentences = re.split(r"(?<=[.!?])\s+", chunk)
+
+    sub_chunks: list[str] = []
+    current = ""
+
+    for sentence in sentences:
+        # If a single sentence exceeds chunk_size, split on word boundary
+        while len(sentence) > chunk_size:
+            space_idx = sentence.rfind(" ", 0, chunk_size)
+            if space_idx <= 0:
+                # No space found — hard cut (shouldn't happen with real text)
+                space_idx = chunk_size
+            if current:
+                sub_chunks.append(current.strip())
+                current = ""
+            sub_chunks.append(sentence[:space_idx].strip())
+            sentence = sentence[space_idx:].strip()
+
+        # Accumulate sentence into current sub-chunk
+        candidate = f"{current} {sentence}".strip() if current else sentence
+        if len(candidate) > chunk_size and current:
+            sub_chunks.append(current.strip())
+            current = sentence
+        else:
+            current = candidate
+
+    if current.strip():
+        sub_chunks.append(current.strip())
+
+    return sub_chunks
+
+
 def chunk_text(
     text: str,
     chunk_size: int = _CHUNK_SIZE,
     overlap: int = _CHUNK_OVERLAP,
 ) -> list[str]:
     """Split text into chunks at paragraph boundaries with overlap.
+
+    If any paragraph-level chunk exceeds chunk_size, it is further split
+    on sentence boundaries (then word boundaries as a last resort).
 
     Pure function — no side effects.
     """
@@ -68,7 +114,15 @@ def chunk_text(
     if current_chunk.strip():
         chunks.append(current_chunk.strip())
 
-    return chunks
+    # Post-pass: split any oversized chunks on sentence/word boundaries
+    final_chunks: list[str] = []
+    for c in chunks:
+        if len(c) > chunk_size:
+            final_chunks.extend(_split_oversized_chunk(c, chunk_size))
+        else:
+            final_chunks.append(c)
+
+    return final_chunks
 
 
 def _content_hash(content: str) -> str:
@@ -92,26 +146,41 @@ async def ingest_text(
     if not chunks:
         return 0
 
+    sb = await get_supabase_client()
+
+    # If source_url is provided, delete all existing chunks for this URL first
+    # (clean re-ingestion, consistent with ingest_url behaviour)
+    if source_url:
+        await (
+            sb.table("spark_documents")
+            .delete()
+            .eq("client_id", str(client_id))
+            .eq("source_url", source_url)
+            .execute()
+        )
+
     # Compute hashes
     hashes = [_content_hash(c) for c in chunks]
 
-    # Check which hashes already exist
-    sb = await get_supabase_client()
-    existing_result = await (
-        sb.table("spark_documents")
-        .select("content_hash")
-        .eq("client_id", str(client_id))
-        .in_("content_hash", hashes)
-        .execute()
-    )
-    existing_hashes = {r["content_hash"] for r in (existing_result.data or [])}
+    if source_url:
+        # After deletion, all chunks are new — skip hash-dedup lookup
+        new_items = [(i, chunk, h) for i, (chunk, h) in enumerate(zip(chunks, hashes))]
+    else:
+        # Hash-dedup: check which hashes already exist
+        existing_result = await (
+            sb.table("spark_documents")
+            .select("content_hash")
+            .eq("client_id", str(client_id))
+            .in_("content_hash", hashes)
+            .execute()
+        )
+        existing_hashes = {r["content_hash"] for r in (existing_result.data or [])}
 
-    # Filter to new chunks only
-    new_items = [
-        (i, chunk, h)
-        for i, (chunk, h) in enumerate(zip(chunks, hashes))
-        if h not in existing_hashes
-    ]
+        new_items = [
+            (i, chunk, h)
+            for i, (chunk, h) in enumerate(zip(chunks, hashes))
+            if h not in existing_hashes
+        ]
 
     if not new_items:
         logger.info("Spark ingestion: all %d chunks already exist", len(chunks))
@@ -198,23 +267,38 @@ async def ingest_url(
     async with httpx.AsyncClient(timeout=30.0) as http:
         response = await http.get(url, follow_redirects=True)
         response.raise_for_status()
-        html = response.text
 
-    # Strip HTML
-    content = _strip_html(html)
+    # Route by Content-Type
+    content_type = response.headers.get("content-type", "")
+    # Extract the MIME type (before any charset parameter)
+    mime_type = content_type.split(";")[0].strip().lower() if content_type else ""
+
+    if "pdf" in mime_type or mime_type == "application/pdf":
+        raise ValueError(
+            "PDF ingestion is not yet supported. "
+            "Please paste the text content directly."
+        )
+
+    if mime_type and mime_type not in ("text/html", "text/plain") and "html" not in mime_type:
+        raise ValueError(
+            f"Unsupported content type: {content_type}. "
+            "Supported types: text/html, text/plain"
+        )
+
+    raw_text = response.text
+
+    # text/plain → skip HTML stripping; everything else → strip HTML
+    if mime_type == "text/plain":
+        content = raw_text.strip()
+    else:
+        content = _strip_html(raw_text)
+
     if not content:
         logger.warning("Spark URL ingestion: no content extracted from %s", url)
         return 0
 
-    # Delete existing chunks for this URL (clean re-ingestion)
-    sb = await get_supabase_client()
-    await (
-        sb.table("spark_documents")
-        .delete()
-        .eq("client_id", str(client_id))
-        .eq("source_url", url)
-        .execute()
-    )
+    # ingest_text() handles deletion when source_url is provided,
+    # so no need to delete here — avoids double-delete race window.
 
     # Ingest fresh
     return await ingest_text(

@@ -80,12 +80,25 @@ const knowledgeCategoryVariants: Record<string, BadgeVariant> = {
   legal: "red",
   team: "purple",
   fun: "default",
+  customer_profile: "blue",
+  procedure: "gray",
+};
+
+const knowledgeCategoryLabels: Record<string, string> = {
+  company: "Company",
+  product: "Product",
+  competitor: "Competitor",
+  legal: "Legal",
+  team: "Team",
+  fun: "Fun",
+  customer_profile: "Customer Profile",
+  procedure: "Procedure",
 };
 
 export function KnowledgeCategoryBadge({ category }: { category: string }) {
   return (
     <Badge variant={knowledgeCategoryVariants[category] ?? "default"}>
-      {category}
+      {knowledgeCategoryLabels[category] ?? category}
     </Badge>
   );
 }

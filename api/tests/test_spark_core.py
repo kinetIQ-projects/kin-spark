@@ -318,3 +318,112 @@ class TestProcessMessage:
         parsed = _collect_events(events)
         event_types = [e["event"] for e in parsed]
         assert "error" in event_types
+
+
+# ===========================================================================
+# TestOrientationPassthrough
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestOrientationPassthrough:
+    """Orientation resolution in the core pipeline."""
+
+    @pytest.mark.asyncio
+    async def test_core_passes_client_orientation(self) -> None:
+        """Client with client_orientation passes it to build_system_prompt."""
+        preflight = PreflightResult(
+            safe=True,
+            in_scope=True,
+            retrieved_chunks=[],
+            conversation_state="active",
+        )
+
+        async def mock_stream(*args: object, **kwargs: object) -> AsyncGenerator[str, None]:
+            yield "Ok"
+
+        captured_kwargs: dict[str, object] = {}
+
+        def spy_build(**kwargs: object) -> str:
+            captured_kwargs.update(kwargs)
+            return "system prompt"
+
+        with patch.object(
+            core_mod, "run_preflight", AsyncMock(return_value=preflight)
+        ), patch.object(
+            core_mod, "increment_turn", AsyncMock(return_value=1)
+        ), patch.object(
+            core_mod, "get_history", AsyncMock(return_value=[])
+        ), patch.object(
+            core_mod, "store_message", AsyncMock(return_value={})
+        ), patch.object(
+            core_mod.llm, "stream", side_effect=mock_stream
+        ), patch.object(
+            core_mod, "normalize_format", side_effect=lambda x: x
+        ), patch.object(
+            core_mod, "_emit_analytics", AsyncMock(return_value=None)
+        ), patch.object(
+            core_mod, "build_system_prompt", side_effect=spy_build
+        ):
+            await _consume(
+                core_mod.process_message(
+                    message="Hi",
+                    client_id=_CLIENT_ID,
+                    conversation_id=_CONV_ID,
+                    settling_config=_DEFAULT_CONFIG,
+                    max_turns=20,
+                    turn_count=0,
+                    client_orientation="Custom orientation with {company_name}",
+                )
+            )
+
+        assert captured_kwargs.get("orientation_text") == "Custom orientation with {company_name}"
+
+    @pytest.mark.asyncio
+    async def test_core_passes_none_orientation_when_not_set(self) -> None:
+        """Client without client_orientation passes None."""
+        preflight = PreflightResult(
+            safe=True,
+            in_scope=True,
+            retrieved_chunks=[],
+            conversation_state="active",
+        )
+
+        async def mock_stream(*args: object, **kwargs: object) -> AsyncGenerator[str, None]:
+            yield "Ok"
+
+        captured_kwargs: dict[str, object] = {}
+
+        def spy_build(**kwargs: object) -> str:
+            captured_kwargs.update(kwargs)
+            return "system prompt"
+
+        with patch.object(
+            core_mod, "run_preflight", AsyncMock(return_value=preflight)
+        ), patch.object(
+            core_mod, "increment_turn", AsyncMock(return_value=1)
+        ), patch.object(
+            core_mod, "get_history", AsyncMock(return_value=[])
+        ), patch.object(
+            core_mod, "store_message", AsyncMock(return_value={})
+        ), patch.object(
+            core_mod.llm, "stream", side_effect=mock_stream
+        ), patch.object(
+            core_mod, "normalize_format", side_effect=lambda x: x
+        ), patch.object(
+            core_mod, "_emit_analytics", AsyncMock(return_value=None)
+        ), patch.object(
+            core_mod, "build_system_prompt", side_effect=spy_build
+        ):
+            await _consume(
+                core_mod.process_message(
+                    message="Hi",
+                    client_id=_CLIENT_ID,
+                    conversation_id=_CONV_ID,
+                    settling_config=_DEFAULT_CONFIG,
+                    max_turns=20,
+                    turn_count=0,
+                )
+            )
+
+        assert captured_kwargs.get("orientation_text") is None

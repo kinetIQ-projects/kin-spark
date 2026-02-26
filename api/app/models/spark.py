@@ -119,6 +119,7 @@ class SparkClient(BaseModel):
     max_turns: int = 20
     rate_limit_rpm: int = 30
     active: bool = True
+    client_orientation: str | None = None
 
     class Config:
         from_attributes = True

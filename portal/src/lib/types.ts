@@ -141,7 +141,20 @@ export type KnowledgeCategory =
   | "competitor"
   | "legal"
   | "team"
-  | "fun";
+  | "fun"
+  | "customer_profile"
+  | "procedure";
+
+export const KNOWLEDGE_CATEGORY_LABELS: Record<KnowledgeCategory, string> = {
+  company: "Company",
+  product: "Product",
+  competitor: "Competitor",
+  legal: "Legal",
+  team: "Team",
+  fun: "Fun",
+  customer_profile: "Customer Profile",
+  procedure: "Procedure",
+};
 
 export interface KnowledgeItem {
   id: string;
@@ -180,4 +193,24 @@ export interface KnowledgeStats {
   total_items: number;
   active_items: number;
   categories: Record<string, number>;
+}
+
+// ── Onboarding ──────────────────────────────────────────────────
+
+export interface OnboardingCustomerProfile {
+  name: string;
+  description: string;
+  signals: string;
+  needs: string;
+}
+
+export interface OnboardingData {
+  purpose_story: Record<string, string>;
+  values_culture: Record<string, string>;
+  brand_voice: Record<string, string | string[]>;
+  customers: OnboardingCustomerProfile[];
+  procedures_policies: Record<string, string>;
+  additional_context: string;
+  completed_at: string | null;
+  last_saved_at: string | null;
 }

@@ -228,6 +228,40 @@ class TestCreateKnowledge:
         )
         assert resp.status_code == 422
 
+    def test_create_knowledge_item_customer_profile_category(self) -> None:
+        """customer_profile category is accepted."""
+        row = {**_ITEM_ROW, "category": "customer_profile"}
+        with patch(
+            "app.routers.admin.knowledge_svc.create_knowledge_item",
+            AsyncMock(return_value=row),
+        ):
+            resp = client.post(
+                "/spark/admin/knowledge",
+                json={
+                    "title": "Ideal Customer",
+                    "content": "Series A SaaS founders in the US.",
+                    "category": "customer_profile",
+                },
+            )
+        assert resp.status_code == 201
+
+    def test_create_knowledge_item_procedure_category(self) -> None:
+        """procedure category is accepted."""
+        row = {**_ITEM_ROW, "category": "procedure"}
+        with patch(
+            "app.routers.admin.knowledge_svc.create_knowledge_item",
+            AsyncMock(return_value=row),
+        ):
+            resp = client.post(
+                "/spark/admin/knowledge",
+                json={
+                    "title": "Onboarding Flow",
+                    "content": "Step 1: Schedule discovery call.",
+                    "category": "procedure",
+                },
+            )
+        assert resp.status_code == 201
+
 
 # ===========================================================================
 # Get by ID

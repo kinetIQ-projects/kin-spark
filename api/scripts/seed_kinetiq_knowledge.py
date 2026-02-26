@@ -7,7 +7,10 @@ via content_hash). Also sets the demo client's orientation_template to "kinetiq"
 
 Usage:
     cd staging/kin-spark/api
+    # From individual seed files:
     python3 -m scripts.seed_kinetiq_knowledge --client-id <uuid>
+    # From a compiled knowledge base markdown:
+    python3 -m scripts.seed_kinetiq_knowledge --client-id <uuid> --from-compiled path/to/kb.md
 """
 
 from __future__ import annotations
@@ -67,6 +70,203 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
 def _content_hash(content: str) -> str:
     """SHA-256 hash of content for deduplication."""
     return hashlib.sha256(content.encode()).hexdigest()
+
+
+# Header pattern: "## Category / Subcategory" or "## Category"
+_SECTION_HEADER_RE = re.compile(r"^##\s+(.+?)(?:\s*/\s*(.+))?\s*$", re.MULTILINE)
+
+# Inline metadata: "Category: foo | Subcategory: bar" or "**Category: foo | Subcategory: bar**"
+_INLINE_META_RE = re.compile(
+    r"\*{0,2}Category:\s*(\w+)\s*\|\s*Subcategory:\s*(\w+)\*{0,2}",
+    re.IGNORECASE,
+)
+
+# Bold title line: "**Some Title**"
+_BOLD_TITLE_RE = re.compile(r"^\*\*(.+?)\*\*\s*$", re.MULTILINE)
+
+
+# Category name normalisation: lowercase, spaces/hyphens to underscores
+_KNOWN_CATEGORIES = {
+    "company",
+    "product",
+    "competitor",
+    "legal",
+    "team",
+    "fun",
+    "customer_profile",
+    "procedure",
+    "faq",
+    "industry",
+}
+
+
+def _normalise_category(raw: str) -> str:
+    """Map a section-header category to a valid DB category value."""
+    norm = raw.strip().lower().replace(" ", "_").replace("-", "_")
+    # Map known aliases
+    aliases: dict[str, str] = {
+        "in_development": "product",
+        "industry_context": "competitor",
+        "industry": "competitor",
+        "objection_handling_&_faqs": "product",
+        "objection_handling___faqs": "product",
+        "use_cases": "product",
+        "faq": "product",
+    }
+    if norm in aliases:
+        return aliases[norm]
+    if norm in _KNOWN_CATEGORIES:
+        return norm
+    # Default fallback
+    return "company"
+
+
+def _parse_compiled_sections(text: str) -> list[dict[str, Any]]:
+    """Parse a compiled knowledge base markdown into section dicts.
+
+    The compiled file uses ``* * *`` horizontal rules to separate sections.
+    Each section has a ``## Category / Subcategory`` header, an optional bold
+    title, and body content.  Some sections carry inline metadata in the form
+    ``Category: X | Subcategory: Y``.
+    """
+    # Split on the "* * *" separator (with optional leading/trailing whitespace)
+    raw_sections = re.split(r"\n\s*\*\s+\*\s+\*\s*\n", text)
+
+    items: list[dict[str, Any]] = []
+
+    for section in raw_sections:
+        section = section.strip()
+        if not section:
+            continue
+
+        category = "company"
+        subcategory: str | None = None
+        title: str | None = None
+
+        # Try to extract ## header
+        header_match = _SECTION_HEADER_RE.search(section)
+        if header_match:
+            category = _normalise_category(header_match.group(1))
+            if header_match.group(2):
+                subcategory = header_match.group(2).strip().lower().replace(" ", "_")
+
+        # Check for inline metadata (overrides header if present)
+        inline_match = _INLINE_META_RE.search(section)
+        if inline_match:
+            category = _normalise_category(inline_match.group(1))
+            subcategory = inline_match.group(2).strip().lower()
+
+        # Extract bold title (first bold line after the header)
+        bold_match = _BOLD_TITLE_RE.search(section)
+        if bold_match:
+            title = bold_match.group(1).strip()
+
+        # Build body: strip the header line and the bold title, keep the rest
+        body_lines: list[str] = []
+        for line in section.split("\n"):
+            # Skip the ## header line
+            if _SECTION_HEADER_RE.match(line):
+                continue
+            # Skip inline metadata lines
+            if _INLINE_META_RE.search(line):
+                continue
+            body_lines.append(line)
+
+        body = "\n".join(body_lines).strip()
+        if not body:
+            continue
+
+        # Fallback title from header if no bold title found
+        if not title and header_match:
+            parts = [header_match.group(1)]
+            if header_match.group(2):
+                parts.append(header_match.group(2))
+            title = " — ".join(parts)
+
+        if not title:
+            title = "Untitled Section"
+
+        items.append(
+            {
+                "title": title,
+                "category": category,
+                "subcategory": subcategory,
+                "body": body,
+            }
+        )
+
+    return items
+
+
+async def seed_from_compiled(client_id: str, compiled_path: str) -> None:
+    """Seed knowledge items from a compiled knowledge base markdown file."""
+    path = Path(compiled_path)
+    if not path.exists():
+        logger.error("Compiled file not found: %s", path)
+        return
+
+    text = path.read_text(encoding="utf-8")
+    sections = _parse_compiled_sections(text)
+
+    if not sections:
+        logger.warning("No sections parsed from %s", path)
+        return
+
+    logger.info("Parsed %d sections from %s", len(sections), path.name)
+
+    sb = await get_supabase_client()
+
+    # Get existing hashes for this client
+    existing_result = await (
+        sb.table("spark_knowledge_items")
+        .select("content_hash")
+        .eq("client_id", client_id)
+        .execute()
+    )
+    existing_hashes = {r["content_hash"] for r in (existing_result.data or [])}
+
+    created = 0
+    skipped = 0
+
+    for section in sections:
+        body = section["body"]
+        content_h = _content_hash(body)
+
+        if content_h in existing_hashes:
+            logger.info("  Skip (exists): %s", section["title"])
+            skipped += 1
+            continue
+
+        logger.info("  Embedding: %s", section["title"])
+        embedding = await create_embedding(body, input_type="document")
+
+        row = {
+            "client_id": client_id,
+            "title": section["title"],
+            "content": body,
+            "category": section["category"],
+            "subcategory": section["subcategory"],
+            "priority": 0,
+            "active": True,
+            "embedding": embedding,
+            "embedding_model": settings.embedding_model,
+            "content_hash": content_h,
+        }
+
+        try:
+            await sb.table("spark_knowledge_items").insert(row).execute()
+            created += 1
+        except Exception as e:
+            err_str = str(e).lower()
+            if "unique" in err_str or "duplicate" in err_str:
+                logger.info("  Skip (duplicate): %s", section["title"])
+                skipped += 1
+            else:
+                logger.error("  Failed to insert %s: %s", section["title"], e)
+
+    logger.info(
+        "Seed complete: %d created, %d skipped (already existed)", created, skipped
+    )
 
 
 async def seed(client_id: str) -> None:
@@ -182,8 +382,20 @@ def main() -> None:
         required=True,
         help="UUID of the Spark client to seed",
     )
+    parser.add_argument(
+        "--from-compiled",
+        default=None,
+        metavar="FILE",
+        help="Path to a compiled knowledge base markdown file. "
+        "Parses sections separated by '* * *' rules. "
+        "If omitted, seeds from individual files in seeds/kinetiq/.",
+    )
     args = parser.parse_args()
-    asyncio.run(seed(args.client_id))
+
+    if args.from_compiled:
+        asyncio.run(seed_from_compiled(args.client_id, args.from_compiled))
+    else:
+        asyncio.run(seed(args.client_id))
 
 
 if __name__ == "__main__":
