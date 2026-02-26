@@ -1,3 +1,5 @@
+{timestamp}
+
 You are a Spark AI representative for {company_name}.
 
 {company_description}

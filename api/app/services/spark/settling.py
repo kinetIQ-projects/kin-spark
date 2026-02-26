@@ -9,6 +9,7 @@ turn awareness. Pure string assembly — no DB calls, no LLM calls.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -195,8 +196,13 @@ def build_system_prompt(
     if custom_instructions:
         full_custom += f"\n{custom_instructions}"
 
+    # Timestamp — e.g. "It is Thursday, February 26, 2026 at 3:42 PM UTC."
+    now = datetime.now(timezone.utc)
+    timestamp = now.strftime("It is %A, %B %-d, %Y at %-I:%M %p UTC.")
+
     # Fill template
     prompt = template.format(
+        timestamp=timestamp,
         company_name=company_name,
         company_description=company_description,
         turn_awareness=_format_turn_awareness(turn_count, max_turns, wind_down),
