@@ -157,7 +157,7 @@ async def process_message(
         if preflight.rejection_tier == "terminate":
             from app.services.spark.session import end_session
 
-            await end_session(conversation_id, state="terminated")
+            await end_session(conversation_id, state="terminated", outcome="terminated")
 
         yield _sse_event("done", {})
         return
@@ -184,7 +184,7 @@ async def process_message(
 
         from app.services.spark.session import end_session
 
-        await end_session(conversation_id, state="completed")
+        await end_session(conversation_id, state="completed", outcome="completed")
         yield _sse_event("done", {"turns_remaining": 0})
         return
 

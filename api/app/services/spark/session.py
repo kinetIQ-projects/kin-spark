@@ -91,10 +91,20 @@ async def get_session(
         expires_at = expires_at.replace(tzinfo=timezone.utc)
     if datetime.now(timezone.utc) > expires_at:
         logger.info("Spark session expired: %s", row["id"])
-        # Mark as expired
-        await sb.table("spark_conversations").update({"state": "expired"}).eq(
-            "id", row["id"]
-        ).execute()
+        now = datetime.now(timezone.utc).isoformat()
+        await (
+            sb.table("spark_conversations")
+            .update(
+                {
+                    "state": "expired",
+                    "outcome": "abandoned",
+                    "ended_at": now,
+                    "updated_at": now,
+                }
+            )
+            .eq("id", row["id"])
+            .execute()
+        )
         return None
 
     return row
@@ -196,18 +206,37 @@ async def store_message(
     return result.data[0]
 
 
-async def end_session(conversation_id: UUID, state: str = "completed") -> None:
-    """Mark a conversation as completed or abandoned."""
+async def end_session(
+    conversation_id: UUID,
+    state: str = "completed",
+    outcome: str | None = None,
+) -> None:
+    """Mark a conversation as completed or abandoned.
+
+    Args:
+        conversation_id: The conversation to end.
+        state: New state value (completed, terminated, expired, etc.)
+        outcome: Lifecycle outcome (completed, lead_captured, terminated, abandoned).
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    update_data: dict[str, Any] = {
+        "state": state,
+        "ended_at": now,
+        "updated_at": now,
+    }
+    if outcome:
+        update_data["outcome"] = outcome
+
     sb = await get_supabase_client()
     await (
         sb.table("spark_conversations")
-        .update(
-            {
-                "state": state,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            }
-        )
+        .update(update_data)
         .eq("id", str(conversation_id))
         .execute()
     )
-    logger.info("Spark session ended: %s (%s)", conversation_id, state)
+    logger.info(
+        "Spark session ended: %s (state=%s, outcome=%s)",
+        conversation_id,
+        state,
+        outcome,
+    )

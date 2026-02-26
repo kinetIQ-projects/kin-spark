@@ -146,6 +146,14 @@ async def spark_lead(
         }
     ).execute()
 
+    # Set outcome on the conversation
+    await (
+        sb.table("spark_conversations")
+        .update({"outcome": "lead_captured"})
+        .eq("id", str(body.conversation_id))
+        .execute()
+    )
+
     # Analytics
     await sb.table("spark_events").insert(
         {
