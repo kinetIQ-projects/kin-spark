@@ -240,7 +240,7 @@ async def process_message(
         async for chunk in llm.stream(
             messages=llm_messages,
             model=settings.spark_primary_model,
-            temperature=0.7,
+            temperature=1.0,
             max_tokens=1024,
         ):
             full_response += chunk
