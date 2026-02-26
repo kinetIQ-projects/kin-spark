@@ -92,3 +92,38 @@ export interface ClientProfile {
   sessions_per_visitor_per_day: number | null;
   created_at: string | null;
 }
+
+// ── Dashboard ───────────────────────────────────────────────────
+
+export interface DashboardSummary {
+  total_conversations: number;
+  total_leads: number;
+  conversion_rate: number;
+  avg_turns: number;
+  avg_duration_seconds: number | null;
+  conversations_with_duration: number;
+}
+
+export interface TimeseriesPoint {
+  date: string;
+  conversations: number;
+  leads: number;
+}
+
+export interface OutcomeBucket {
+  outcome: string;
+  count: number;
+}
+
+export interface SentimentBucket {
+  sentiment: string;
+  count: number;
+}
+
+export interface DashboardTimeseries {
+  daily: TimeseriesPoint[];
+  outcomes: OutcomeBucket[];
+  sentiments: SentimentBucket[];
+}
+
+export type DateRange = 7 | 30 | 90;

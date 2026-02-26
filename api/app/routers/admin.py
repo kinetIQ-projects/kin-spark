@@ -8,14 +8,18 @@ Endpoints:
   GET  /spark/admin/leads                 — List leads (filterable)
   PATCH /spark/admin/leads/{id}           — Update lead status/notes
   GET  /spark/admin/leads/export          — CSV export
+  GET  /spark/admin/metrics/summary       — Dashboard KPI summary
+  GET  /spark/admin/metrics/timeseries    — Dashboard charts data
 """
 
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import logging
-from datetime import datetime
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
@@ -31,6 +35,13 @@ from app.models.admin import (
     AdminLeadUpdate,
     AdminTranscriptMessage,
     PaginatedResponse,
+)
+from app.models.dashboard import (
+    DashboardSummary,
+    DashboardTimeseries,
+    OutcomeBucket,
+    SentimentBucket,
+    TimeseriesPoint,
 )
 from app.models.spark import SparkClient
 from app.services.spark.admin_auth import verify_admin_jwt
@@ -466,6 +477,223 @@ async def update_lead(
 
     updated = result.data[0] if result.data else existing.data[0]
     return AdminLeadListItem(**updated)
+
+
+# =============================================================================
+# METRICS
+# =============================================================================
+
+_TRUNCATION_LIMIT = 10000
+
+
+@router.get("/metrics/summary")
+async def metrics_summary(
+    request: Request,
+    _rate: None = Depends(_admin_rate_limit),
+    client: SparkClient = Depends(verify_admin_jwt),
+    days: int = Query(default=7, ge=1, le=90),
+) -> DashboardSummary:
+    """Dashboard KPI summary: totals, conversion rate, averages."""
+    sb = await get_supabase_client()
+    since_iso = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    try:
+        conv_result, lead_result = await asyncio.gather(
+            sb.table("spark_conversations")
+            .select("turn_count,created_at,ended_at", count="exact")
+            .eq("client_id", str(client.id))
+            .gte("created_at", since_iso)
+            .limit(_TRUNCATION_LIMIT)
+            .execute(),
+            sb.table("spark_leads")
+            .select("id", count="exact")
+            .eq("client_id", str(client.id))
+            .gte("created_at", since_iso)
+            .limit(_TRUNCATION_LIMIT)
+            .execute(),
+        )
+    except Exception:
+        logger.exception("Admin: failed to fetch summary metrics")
+        raise HTTPException(status_code=500, detail="Failed to fetch metrics")
+
+    conversations = conv_result.data or []
+    total_conversations = (
+        conv_result.count if conv_result.count is not None else len(conversations)
+    )
+    total_leads = (
+        lead_result.count
+        if lead_result.count is not None
+        else len(lead_result.data or [])
+    )
+
+    # Truncation detection
+    if len(conversations) < total_conversations:
+        logger.warning(
+            "Admin metrics: conversation rows truncated for client %s "
+            "(fetched=%d, total=%d)",
+            client.id,
+            len(conversations),
+            total_conversations,
+        )
+    if len(lead_result.data or []) < total_leads:
+        logger.warning(
+            "Admin metrics: lead rows truncated for client %s "
+            "(fetched=%d, total=%d)",
+            client.id,
+            len(lead_result.data or []),
+            total_leads,
+        )
+
+    # Conversion rate
+    conversion_rate = (
+        total_leads / total_conversations if total_conversations > 0 else 0.0
+    )
+
+    # Average turns (from fetched rows — accurate unless truncated)
+    turn_counts = [row.get("turn_count", 0) for row in conversations]
+    avg_turns = sum(turn_counts) / len(turn_counts) if turn_counts else 0.0
+
+    # Average duration (only rows with both timestamps)
+    durations: list[float] = []
+    for row in conversations:
+        created = row.get("created_at")
+        ended = row.get("ended_at")
+        if created and ended:
+            try:
+                dt_created = datetime.fromisoformat(created)
+                dt_ended = datetime.fromisoformat(ended)
+                durations.append((dt_ended - dt_created).total_seconds())
+            except (ValueError, TypeError):
+                pass
+
+    avg_duration = sum(durations) / len(durations) if durations else None
+
+    return DashboardSummary(
+        total_conversations=total_conversations,
+        total_leads=total_leads,
+        conversion_rate=round(conversion_rate, 4),
+        avg_turns=round(avg_turns, 1),
+        avg_duration_seconds=(
+            round(avg_duration, 1) if avg_duration is not None else None
+        ),
+        conversations_with_duration=len(durations),
+    )
+
+
+@router.get("/metrics/timeseries")
+async def metrics_timeseries(
+    request: Request,
+    _rate: None = Depends(_admin_rate_limit),
+    client: SparkClient = Depends(verify_admin_jwt),
+    days: int = Query(default=7, ge=1, le=90),
+) -> DashboardTimeseries:
+    """Dashboard timeseries: daily counts, outcome and sentiment distributions."""
+    sb = await get_supabase_client()
+    since_iso = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    try:
+        conv_result, lead_result = await asyncio.gather(
+            sb.table("spark_conversations")
+            .select("created_at,outcome,sentiment", count="exact")
+            .eq("client_id", str(client.id))
+            .gte("created_at", since_iso)
+            .limit(_TRUNCATION_LIMIT)
+            .execute(),
+            sb.table("spark_leads")
+            .select("created_at", count="exact")
+            .eq("client_id", str(client.id))
+            .gte("created_at", since_iso)
+            .limit(_TRUNCATION_LIMIT)
+            .execute(),
+        )
+    except Exception:
+        logger.exception("Admin: failed to fetch timeseries metrics")
+        raise HTTPException(status_code=500, detail="Failed to fetch metrics")
+
+    conversations = conv_result.data or []
+    leads = lead_result.data or []
+
+    # Truncation detection
+    conv_total = (
+        conv_result.count if conv_result.count is not None else len(conversations)
+    )
+    lead_total = lead_result.count if lead_result.count is not None else len(leads)
+    if len(conversations) < conv_total:
+        logger.warning(
+            "Admin timeseries: conversation rows truncated for client %s "
+            "(fetched=%d, total=%d)",
+            client.id,
+            len(conversations),
+            conv_total,
+        )
+    if len(leads) < lead_total:
+        logger.warning(
+            "Admin timeseries: lead rows truncated for client %s "
+            "(fetched=%d, total=%d)",
+            client.id,
+            len(leads),
+            lead_total,
+        )
+
+    # Build date range (full range, gap-filled with zeros)
+    # NOTE: UTC date boundaries (v1) — no timezone adjustment
+    today = datetime.now(timezone.utc).date()
+    date_range = [
+        (today - timedelta(days=days - 1 - i)).isoformat() for i in range(days)
+    ]
+
+    # Bucket conversations by date
+    conv_by_date: Counter[str] = Counter()
+    for row in conversations:
+        created = row.get("created_at")
+        if created:
+            try:
+                conv_by_date[datetime.fromisoformat(created).date().isoformat()] += 1
+            except (ValueError, TypeError):
+                pass
+
+    # Bucket leads by date
+    lead_by_date: Counter[str] = Counter()
+    for row in leads:
+        created = row.get("created_at")
+        if created:
+            try:
+                lead_by_date[datetime.fromisoformat(created).date().isoformat()] += 1
+            except (ValueError, TypeError):
+                pass
+
+    daily = [
+        TimeseriesPoint(
+            date=d,
+            conversations=conv_by_date.get(d, 0),
+            leads=lead_by_date.get(d, 0),
+        )
+        for d in date_range
+    ]
+
+    # Outcome distribution (exclude None/null)
+    outcome_counts: Counter[str] = Counter()
+    for row in conversations:
+        outcome = row.get("outcome")
+        if outcome:
+            outcome_counts[outcome] += 1
+
+    outcomes = [
+        OutcomeBucket(outcome=k, count=v) for k, v in outcome_counts.most_common()
+    ]
+
+    # Sentiment distribution (exclude None/null)
+    sentiment_counts: Counter[str] = Counter()
+    for row in conversations:
+        sentiment = row.get("sentiment")
+        if sentiment:
+            sentiment_counts[sentiment] += 1
+
+    sentiments = [
+        SentimentBucket(sentiment=k, count=v) for k, v in sentiment_counts.most_common()
+    ]
+
+    return DashboardTimeseries(daily=daily, outcomes=outcomes, sentiments=sentiments)
 
 
 # =============================================================================
