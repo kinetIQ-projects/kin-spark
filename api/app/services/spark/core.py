@@ -347,6 +347,7 @@ async def process_message(
     full_response = ""
     buffer = ""
     past_notes = False
+    response_started = False
     try:
         async for chunk in llm.stream(
             messages=llm_messages,
@@ -357,7 +358,12 @@ async def process_message(
             full_response += chunk
 
             if past_notes:
-                # Already past the notes — stream directly
+                if not response_started:
+                    # Strip leading whitespace from first content after notes
+                    chunk = chunk.lstrip()
+                    if not chunk:
+                        continue
+                    response_started = True
                 yield _sse_event("token", {"text": chunk})
                 continue
 
@@ -365,14 +371,16 @@ async def process_message(
 
             if "</spark_notes>" in buffer:
                 # Notes complete — yield everything after the closing tag
-                remainder = buffer.split("</spark_notes>", 1)[1].lstrip("\n")
+                remainder = buffer.split("</spark_notes>", 1)[1].lstrip()
                 if remainder:
                     yield _sse_event("token", {"text": remainder})
+                    response_started = True
                 past_notes = True
             elif "<spark_notes" not in buffer and len(buffer) > 50:
                 # No notes tag after 50 chars — she's not using it, flush
                 yield _sse_event("token", {"text": buffer})
                 past_notes = True
+                response_started = True
 
     except Exception as e:
         logger.error("Spark LLM stream failed: %s", e)
