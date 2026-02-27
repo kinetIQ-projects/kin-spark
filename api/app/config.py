@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     google_ai_api_key: str  # Gemini 3 Flash
     moonshot_api_key: str | None = None  # Fallback — Kimi K2.5
     groq_api_key: str | None = None  # Pre-flight — Groq Llama
+    anthropic_api_key: str | None = None  # Claude Haiku
 
     # Model identifiers (LiteLLM format)
     spark_primary_model: str = "gemini/gemini-3-flash-preview"

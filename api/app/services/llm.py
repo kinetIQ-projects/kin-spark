@@ -29,13 +29,16 @@ def _get_api_key(model: str) -> str | None:
         return settings.moonshot_api_key
     if model.startswith("groq/"):
         return settings.groq_api_key
+    if model.startswith("anthropic/"):
+        return settings.anthropic_api_key
     return None
 
 
 def _get_fallback(model: str) -> str | None:
     """Get fallback model for a given primary."""
     if model == settings.spark_primary_model:
-        return settings.spark_fallback_model
+        fallback = settings.spark_fallback_model
+        return fallback if fallback != model else None
     return None
 
 

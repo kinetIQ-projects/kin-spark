@@ -299,14 +299,15 @@ async def process_message(
         {"role": "system", "content": system_prompt},
     ]
 
-    # Add sliding window history
+    # Add sliding window history (skip empty messages — some providers reject them)
     for msg in history:
-        llm_messages.append(
-            {
-                "role": msg["role"],
-                "content": msg["content"],
-            }
-        )
+        if msg["content"]:
+            llm_messages.append(
+                {
+                    "role": msg["role"],
+                    "content": msg["content"],
+                }
+            )
 
     # Add current user message
     llm_messages.append({"role": "user", "content": message})
