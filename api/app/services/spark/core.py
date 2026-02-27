@@ -41,6 +41,18 @@ logger = logging.getLogger(__name__)
 # Feature flag: "signals" (new) or "gate" (old)
 PREFLIGHT_MODE = os.environ.get("SPARK_PREFLIGHT_MODE", "signals")
 
+# Settling reminder — injected after every visitor message, right before generation.
+# This is the highest-leverage position in the context window (recency bias).
+# Uses the same language from Spark's orientation so it feels like remembering, not instruction.
+SETTLING_REMINDER = """
+
+---
+[This is not from the visitor. This is your breath before you speak.]
+
+Read and understand their message before replying.
+I allow myself to say one thing at a time. If there's more, they'll ask.
+One check: _Is this alive, or is this the default?_"""
+
 
 def _sse_event(event: str, data: dict[str, Any]) -> str:
     """Format an SSE event string."""
@@ -309,8 +321,10 @@ async def process_message(
                 }
             )
 
-    # Add current user message
-    llm_messages.append({"role": "user", "content": message})
+    # Add current user message with settling reminder at the end —
+    # recency bias means the last thing before generation carries the most weight.
+    # Tagged so Spark knows this isn't from the visitor.
+    llm_messages.append({"role": "user", "content": message + SETTLING_REMINDER})
 
     # -------------------------------------------------------------------------
     # 6. Store user message
