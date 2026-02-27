@@ -103,6 +103,7 @@ async def stream(
     start = time.perf_counter()
 
     try:
+        logger.info("LLM stream starting (%s)", resolved)
         response = await litellm.acompletion(
             model=resolved,
             messages=messages,
@@ -111,18 +112,28 @@ async def stream(
             stream=True,
             api_key=_get_api_key(resolved),
             timeout=timeout,
+            stream_timeout=timeout,
         )
 
+        logger.info("LLM stream connected (%s), reading chunks...", resolved)
+        chunk_count = 0
         async for chunk in response:
             if chunk.choices[0].delta.content:
+                chunk_count += 1
                 yield chunk.choices[0].delta.content
 
         elapsed = (time.perf_counter() - start) * 1000
-        logger.debug("LLM stream (%s): %.0fms", resolved, elapsed)
+        logger.info(
+            "LLM stream complete (%s): %.0fms, %d chunks",
+            resolved, elapsed, chunk_count,
+        )
 
     except Exception as e:
         elapsed = (time.perf_counter() - start) * 1000
-        logger.error("LLM stream failed (%s, %.0fms): %s", resolved, elapsed, e)
+        logger.error(
+            "LLM stream failed (%s, %.0fms): %s: %s",
+            resolved, elapsed, type(e).__name__, e,
+        )
 
         fallback = _get_fallback(resolved)
         if fallback:
