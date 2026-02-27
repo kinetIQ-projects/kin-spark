@@ -22,6 +22,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from typing import Any, AsyncGenerator
 from uuid import UUID
 
@@ -49,6 +50,7 @@ SETTLING_REMINDER = """
 ---
 [This is not from the visitor. This is your breath before you speak.]
 
+Start with <spark_notes> — your private thinking space. The visitor won't see it.
 Read and understand their message before replying.
 I allow myself to say one thing at a time. If there's more, they'll ask.
 One check: _Is this alive, or is this the default?_"""
@@ -57,6 +59,11 @@ One check: _Is this alive, or is this the default?_"""
 def _sse_event(event: str, data: dict[str, Any]) -> str:
     """Format an SSE event string."""
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+def _strip_spark_notes(text: str) -> str:
+    """Remove <spark_notes>...</spark_notes> block from response text."""
+    return re.sub(r"<spark_notes>.*?</spark_notes>\s*", "", text, flags=re.DOTALL).strip()
 
 
 def _should_wind_down(turn_count: int, max_turns: int) -> bool:
@@ -332,9 +339,14 @@ async def process_message(
     await store_message(conversation_id, "user", message)
 
     # -------------------------------------------------------------------------
-    # 7. LLM stream
+    # 7. LLM stream (with spark_notes scrubbing)
     # -------------------------------------------------------------------------
+    # Spark may start her generation with <spark_notes>...</spark_notes> —
+    # a private thinking scratchpad. We buffer until the notes close, then
+    # stream only the public response to the visitor.
     full_response = ""
+    buffer = ""
+    past_notes = False
     try:
         async for chunk in llm.stream(
             messages=llm_messages,
@@ -343,16 +355,40 @@ async def process_message(
             max_tokens=1024,
         ):
             full_response += chunk
-            yield _sse_event("token", {"text": chunk})
+
+            if past_notes:
+                # Already past the notes — stream directly
+                yield _sse_event("token", {"text": chunk})
+                continue
+
+            buffer += chunk
+
+            if "</spark_notes>" in buffer:
+                # Notes complete — yield everything after the closing tag
+                remainder = buffer.split("</spark_notes>", 1)[1].lstrip("\n")
+                if remainder:
+                    yield _sse_event("token", {"text": remainder})
+                past_notes = True
+            elif "<spark_notes" not in buffer and len(buffer) > 50:
+                # No notes tag after 50 chars — she's not using it, flush
+                yield _sse_event("token", {"text": buffer})
+                past_notes = True
+
     except Exception as e:
         logger.error("Spark LLM stream failed: %s", e)
         yield _sse_event("error", {"message": "I hit a snag. Please try again."})
         return
 
+    # If still buffering (notes never closed or very short response), flush
+    if not past_notes and buffer:
+        clean = _strip_spark_notes(buffer)
+        if clean:
+            yield _sse_event("token", {"text": clean})
+
     # -------------------------------------------------------------------------
     # 8. Post-process + store
     # -------------------------------------------------------------------------
-    normalized = normalize_format(full_response)
+    normalized = normalize_format(_strip_spark_notes(full_response))
 
     await store_message(conversation_id, "assistant", normalized)
 
