@@ -30,6 +30,7 @@ class SparkLeadCreate(BaseModel):
     name: str | None = None
     email: str | None = Field(None, max_length=320)
     phone: str | None = Field(None, max_length=50)
+    company_name: str | None = None
     notes: str | None = None
 
 
@@ -99,6 +100,7 @@ class SparkLeadOut(BaseModel):
     name: str | None
     email: str | None
     phone: str | None
+    company_name: str | None = None
     notes: str | None
     created_at: datetime
 
@@ -126,10 +128,20 @@ class SparkClient(BaseModel):
 
 
 class PreflightResult(BaseModel):
-    """Result from pre-flight safety + retrieval."""
+    """Result from pre-flight safety + retrieval.
 
-    safe: bool = True
+    In-memory only — never persisted to DB. Analytics events log
+    event_type + metadata dict, not the raw PreflightResult.
+    """
+
+    boundary_signal: Literal[
+        "prompt_probing",
+        "identity_breaking",
+        "extraction_framing",
+        "boundary_erosion",
+        "adversarial_stress",
+    ] | None = None
+    terminate: bool = False
     in_scope: bool = True
-    rejection_tier: Literal["subtle", "firm", "terminate"] | None = None
     retrieved_chunks: list[dict[str, Any]] = Field(default_factory=list)
     conversation_state: str = "active"

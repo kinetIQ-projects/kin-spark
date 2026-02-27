@@ -134,18 +134,29 @@ async def spark_lead(
     client: SparkClient = Depends(verify_spark_api_key),
 ) -> dict[str, str]:
     """Capture a lead from the widget."""
+    import asyncio
+
+    from app.services.spark.crm import sync_lead
+
     sb = await get_supabase_client()
 
-    await sb.table("spark_leads").insert(
-        {
-            "client_id": str(client.id),
-            "conversation_id": str(body.conversation_id),
-            "name": body.name,
-            "email": body.email,
-            "phone": body.phone,
-            "notes": body.notes,
-        }
-    ).execute()
+    lead_row = (
+        await sb.table("spark_leads")
+        .insert(
+            {
+                "client_id": str(client.id),
+                "conversation_id": str(body.conversation_id),
+                "name": body.name,
+                "email": body.email,
+                "phone": body.phone,
+                "company_name": body.company_name,
+                "notes": body.notes,
+            }
+        )
+        .execute()
+    )
+
+    lead_id = lead_row.data[0]["id"] if lead_row.data else None
 
     # Set outcome on the conversation
     await (
@@ -164,9 +175,27 @@ async def spark_lead(
             "metadata": {
                 "has_email": body.email is not None,
                 "has_phone": body.phone is not None,
+                "has_company": body.company_name is not None,
             },
         }
     ).execute()
+
+    # CRM sync (fire-and-forget)
+    if lead_id:
+        try:
+            from uuid import UUID as _UUID
+
+            lead_data = {
+                "email": body.email,
+                "name": body.name,
+                "phone": body.phone,
+                "company_name": body.company_name,
+                "notes": body.notes,
+                "conversation_id": str(body.conversation_id),
+            }
+            asyncio.create_task(sync_lead(client.id, _UUID(str(lead_id)), lead_data))
+        except (ValueError, TypeError):
+            logger.warning("Could not parse lead_id for CRM sync: %s", lead_id)
 
     return {"status": "captured"}
 

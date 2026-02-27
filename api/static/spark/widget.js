@@ -357,6 +357,7 @@
           <div style="font-weight:600;margin-bottom:8px;">Want to continue the conversation?</div>
           <input class="spark-lead-email" type="email" placeholder="Your email" />
           <input class="spark-lead-name" type="text" placeholder="Your name (optional)" />
+          <input class="spark-lead-company" type="text" placeholder="Company (optional)" />
           <button class="spark-lead-submit">Send</button>
           <button class="spark-lead-skip">No thanks</button>
         </div>
@@ -391,6 +392,7 @@
     const leadForm = container.querySelector(".spark-lead-form");
     const leadEmail = container.querySelector(".spark-lead-email");
     const leadName = container.querySelector(".spark-lead-name");
+    const leadCompany = container.querySelector(".spark-lead-company");
     const leadSubmit = container.querySelector(".spark-lead-submit");
     const leadSkip = container.querySelector(".spark-lead-skip");
 
@@ -563,6 +565,7 @@
           conversation_id: conversationId,
           email: email,
           name: leadName.value.trim() || null,
+          company_name: leadCompany.value.trim() || null,
         }),
       })
         .then(function () {
