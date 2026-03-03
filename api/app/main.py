@@ -20,6 +20,7 @@ from starlette.types import ASGIApp
 from app.config import settings
 from app.routers import spark
 from app.routers import admin as admin_router
+from app.routers import ingestion as ingestion_router
 
 # =============================================================================
 # LOGGING
@@ -43,6 +44,15 @@ async def lifespan(app: FastAPI):  # type: ignore[no-untyped-def]
     """Application lifespan handler."""
     logger.info("Starting %s in %s mode", settings.app_name, settings.environment)
     logger.info("Primary model: %s", settings.spark_primary_model)
+
+    # Mark any stale pipeline runs as failed (crash recovery)
+    try:
+        from app.services.spark.pipeline import mark_stale_runs
+
+        await mark_stale_runs()
+    except Exception:
+        logger.exception("Failed to check for stale pipeline runs")
+
     yield
     logger.info("Shutting down %s", settings.app_name)
     from app.services.supabase import close_supabase
@@ -147,6 +157,11 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 
 app.include_router(spark.router, prefix="/spark", tags=["Spark"])
 app.include_router(admin_router.router, prefix="/spark/admin", tags=["Admin"])
+app.include_router(
+    ingestion_router.router,
+    prefix="/spark/admin/ingestion",
+    tags=["Ingestion"],
+)
 
 # Serve widget static files
 app.mount("/static", StaticFiles(directory="static"), name="static")

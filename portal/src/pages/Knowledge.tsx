@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { BookOpen, Plus, Search } from "lucide-react";
+import { BookOpen, Plus, Search, CheckSquare } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import type {
   KnowledgeItem,
@@ -40,6 +40,7 @@ export function Knowledge() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [selectedItem, setSelectedItem] = useState<KnowledgeItem | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout>>();
   const limit = 50;
 
@@ -134,6 +135,24 @@ export function Knowledge() {
     },
   });
 
+  // Bulk activate mutation
+  const bulkActivateMutation = useMutation({
+    mutationFn: ({ itemIds, active }: { itemIds: string[]; active: boolean }) =>
+      apiFetch<{ updated: number }>("/knowledge/bulk-activate", {
+        method: "POST",
+        body: JSON.stringify({ item_ids: itemIds, active }),
+      }),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["knowledge"] });
+      queryClient.invalidateQueries({ queryKey: ["knowledge-stats"] });
+      setSelectedIds(new Set());
+      toast(`${result.updated} items activated`, "default");
+    },
+    onError: () => {
+      toast("Failed to activate items", "destructive");
+    },
+  });
+
   const handleSave = useCallback(
     (id: string, update: KnowledgeUpdate) => {
       updateMutation.mutate({ id, update });
@@ -148,6 +167,30 @@ export function Knowledge() {
     [deleteMutation]
   );
 
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (!data?.items) return;
+    const allIds = data.items.map((i) => i.id);
+    const allSelected = allIds.every((id) => selectedIds.has(id));
+    if (allSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(allIds));
+    }
+  };
+
+  const inactiveCount = stats
+    ? stats.total_items - stats.active_items
+    : 0;
+
   return (
     <div>
       {/* Header */}
@@ -160,6 +203,9 @@ export function Knowledge() {
             <div className="flex items-center gap-2">
               <Badge variant="blue">{stats.total_items} items</Badge>
               <Badge variant="green">{stats.active_items} active</Badge>
+              {inactiveCount > 0 && (
+                <Badge variant="yellow">{inactiveCount} pending</Badge>
+              )}
             </div>
           )}
         </div>
@@ -195,12 +241,13 @@ export function Knowledge() {
           onChange={(e) => {
             setActiveFilter(e.target.value);
             setOffset(0);
+            setSelectedIds(new Set());
           }}
           className="h-9 rounded-md border bg-background px-3 text-sm"
         >
           <option value="">All items</option>
           <option value="true">Active only</option>
-          <option value="false">Inactive only</option>
+          <option value="false">Pending review (inactive)</option>
         </select>
 
         <div className="relative">
@@ -214,6 +261,46 @@ export function Knowledge() {
           />
         </div>
       </div>
+
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div className="mt-3 flex items-center gap-3 rounded-md border bg-blue-50 px-4 py-2">
+          <span className="text-sm font-medium text-blue-800">
+            {selectedIds.size} selected
+          </span>
+          <button
+            onClick={() =>
+              bulkActivateMutation.mutate({
+                itemIds: Array.from(selectedIds),
+                active: true,
+              })
+            }
+            disabled={bulkActivateMutation.isPending}
+            className="inline-flex items-center gap-1 rounded-md bg-green-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-50"
+          >
+            <CheckSquare className="h-3 w-3" />
+            {bulkActivateMutation.isPending ? "Activating..." : "Activate Selected"}
+          </button>
+          <button
+            onClick={() =>
+              bulkActivateMutation.mutate({
+                itemIds: Array.from(selectedIds),
+                active: false,
+              })
+            }
+            disabled={bulkActivateMutation.isPending}
+            className="rounded-md border px-3 py-1.5 text-xs font-medium transition-colors hover:bg-muted disabled:opacity-50"
+          >
+            Deactivate Selected
+          </button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="ml-auto text-xs text-muted-foreground hover:text-foreground"
+          >
+            Clear selection
+          </button>
+        </div>
+      )}
 
       {/* Table */}
       <div className="mt-4 rounded-lg border">
@@ -237,7 +324,18 @@ export function Knowledge() {
         ) : (
           <>
             {/* Header */}
-            <div className="hidden border-b bg-muted/50 px-4 py-2 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[2fr_1fr_1fr_60px_60px_100px]">
+            <div className="hidden border-b bg-muted/50 px-4 py-2 text-xs font-medium text-muted-foreground md:grid md:grid-cols-[32px_2fr_1fr_1fr_60px_60px_100px]">
+              <span>
+                <input
+                  type="checkbox"
+                  checked={
+                    data.items.length > 0 &&
+                    data.items.every((i) => selectedIds.has(i.id))
+                  }
+                  onChange={toggleSelectAll}
+                  className="h-3.5 w-3.5 rounded border-gray-300"
+                />
+              </span>
               <span>Title</span>
               <span>Category</span>
               <span>Subcategory</span>
@@ -250,27 +348,54 @@ export function Knowledge() {
             {data.items.map((item) => (
               <div
                 key={item.id}
-                onClick={() => setSelectedItem(item)}
-                className="cursor-pointer border-b px-4 py-3 transition-colors last:border-b-0 hover:bg-muted/50 md:grid md:grid-cols-[2fr_1fr_1fr_60px_60px_100px] md:items-center"
+                className="border-b px-4 py-3 transition-colors last:border-b-0 hover:bg-muted/50 md:grid md:grid-cols-[32px_2fr_1fr_1fr_60px_60px_100px] md:items-center"
               >
-                <span className="text-sm font-medium">{item.title}</span>
-                <div>
+                <span onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(item.id)}
+                    onChange={() => toggleSelect(item.id)}
+                    className="h-3.5 w-3.5 rounded border-gray-300"
+                  />
+                </span>
+                <span
+                  className="cursor-pointer text-sm font-medium"
+                  onClick={() => setSelectedItem(item)}
+                >
+                  {item.title}
+                </span>
+                <div
+                  className="cursor-pointer"
+                  onClick={() => setSelectedItem(item)}
+                >
                   <KnowledgeCategoryBadge category={item.category} />
                 </div>
-                <span className="text-sm text-muted-foreground">
+                <span
+                  className="cursor-pointer text-sm text-muted-foreground"
+                  onClick={() => setSelectedItem(item)}
+                >
                   {item.subcategory || "—"}
                 </span>
-                <span className="text-sm text-muted-foreground">
+                <span
+                  className="cursor-pointer text-sm text-muted-foreground"
+                  onClick={() => setSelectedItem(item)}
+                >
                   {item.priority}
                 </span>
-                <span>
+                <span
+                  className="cursor-pointer"
+                  onClick={() => setSelectedItem(item)}
+                >
                   <span
                     className={`inline-block h-2 w-2 rounded-full ${
                       item.active ? "bg-green-500" : "bg-gray-300"
                     }`}
                   />
                 </span>
-                <span className="text-sm text-muted-foreground">
+                <span
+                  className="cursor-pointer text-sm text-muted-foreground"
+                  onClick={() => setSelectedItem(item)}
+                >
                   {formatDate(item.updated_at)}
                 </span>
               </div>

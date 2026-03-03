@@ -120,6 +120,7 @@ class AdminClientProfile(BaseModel):
     settling_config: dict[str, Any] = Field(default_factory=dict)
     onboarding_data: dict[str, Any] = Field(default_factory=dict)
     client_orientation: str | None = None
+    website_url: str | None = None
     created_at: datetime | None = None
 
 
@@ -184,3 +185,10 @@ class OrientationResponse(BaseModel):
 
     orientation: str | None = None
     template_name: str = "core"
+
+
+class BulkActivateRequest(BaseModel):
+    """Bulk activate/deactivate knowledge items."""
+
+    item_ids: list[UUID] = Field(..., min_length=1, max_length=200)
+    active: bool = True

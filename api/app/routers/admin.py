@@ -46,6 +46,7 @@ from app.models.admin import (
     AdminLeadUpdate,
     AdminSettingsUpdate,
     AdminTranscriptMessage,
+    BulkActivateRequest,
     OnboardingUpdate,
     OrientationResponse,
     OrientationUpdate,
@@ -898,6 +899,32 @@ async def delete_knowledge(
 ) -> None:
     """Hard delete a knowledge item."""
     await knowledge_svc.delete_knowledge_item(item_id, client.id)
+
+
+@router.post("/knowledge/bulk-activate")
+async def bulk_activate_knowledge(
+    body: BulkActivateRequest,
+    request: Request,
+    _rate: None = Depends(_admin_rate_limit),
+    client: SparkClient = Depends(verify_admin_jwt),
+) -> dict[str, int]:
+    """Bulk activate/deactivate knowledge items by IDs."""
+    sb = await get_supabase_client()
+
+    try:
+        result = await (
+            sb.table("spark_knowledge_items")
+            .update({"active": body.active})
+            .eq("client_id", str(client.id))
+            .in_("id", [str(uid) for uid in body.item_ids])
+            .execute()
+        )
+    except Exception:
+        logger.exception("Admin: failed to bulk activate knowledge items")
+        raise HTTPException(status_code=500, detail="Failed to update items")
+
+    updated = len(result.data) if result.data else 0
+    return {"updated": updated}
 
 
 # =============================================================================

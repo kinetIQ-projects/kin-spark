@@ -195,6 +195,77 @@ export interface KnowledgeStats {
   categories: Record<string, number>;
 }
 
+// ── Ingestion ──────────────────────────────────────────────────
+
+export interface FileUpload {
+  id: string;
+  filename: string;
+  original_name: string;
+  mime_type: string;
+  file_size: number;
+  source_type: string;
+  status: string;
+  page_count: number | null;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PasteItem {
+  id: string;
+  content: string;
+  title: string | null;
+  created_at: string;
+}
+
+export interface PipelineRun {
+  id: string;
+  status: string;
+  trigger_type: string;
+  progress: {
+    stage: string | null;
+    percent: number;
+    message: string;
+  } | null;
+  source_summary: {
+    uploads: number;
+    paste_items: number;
+    questionnaire: boolean;
+    scraped_pages: number;
+  } | null;
+  error_message: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface PresignResponse {
+  upload_id: string;
+  storage_path: string;
+}
+
+export type ProfileType = "voice" | "values" | "boundaries" | "icp" | "procedures";
+
+export const PROFILE_TYPE_LABELS: Record<ProfileType, string> = {
+  voice: "Voice Profile",
+  values: "Values Profile",
+  boundaries: "Boundary Rules",
+  icp: "Ideal Customer Profiles",
+  procedures: "Procedure Playbooks",
+};
+
+export interface Profile {
+  id: string;
+  profile_type: ProfileType;
+  version: number;
+  content: string;
+  status: string;
+  client_feedback: string | null;
+  reviewed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ── Onboarding ──────────────────────────────────────────────────
 
 export interface OnboardingCustomerProfile {

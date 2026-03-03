@@ -65,6 +65,23 @@ class Settings(BaseSettings):
     spark_session_timeout_minutes: int = 30
 
     # ==========================================================================
+    # INGESTION PIPELINE
+    # ==========================================================================
+    supabase_storage_bucket: str = "spark-uploads"
+    max_upload_size_bytes: int = 50_000_000  # 50MB
+    allowed_upload_types: str = (
+        "application/pdf,"
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document,"
+        "text/plain,"
+        "image/png,"
+        "image/jpeg,"
+        "image/webp"
+    )
+    pipeline_stage_1_model: str = "anthropic/claude-sonnet-4-6"
+    pipeline_stage_2_model: str = "anthropic/claude-opus-4-6"
+    pipeline_stage_3_model: str = "anthropic/claude-opus-4-6"
+
+    # ==========================================================================
     # CORS
     # ==========================================================================
     # Spark uses wildcard CORS (publishable key auth, widget embeds anywhere)

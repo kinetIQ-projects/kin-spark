@@ -9,6 +9,7 @@ import { ConversationDetail } from "@/pages/ConversationDetail";
 import { Leads } from "@/pages/Leads";
 import { Knowledge } from "@/pages/Knowledge";
 import { Onboarding } from "@/pages/Onboarding";
+import { Ingestion } from "@/pages/Ingestion";
 import { Settings } from "@/pages/Settings";
 
 export default function App() {
@@ -27,7 +28,8 @@ export default function App() {
           <Route path="/conversations" element={<Conversations />} />
           <Route path="/conversations/:id" element={<ConversationDetail />} />
           <Route path="/leads" element={<Leads />} />
-          <Route path="/onboarding" element={<Onboarding />} />
+          <Route path="/ingestion" element={<Ingestion />} />
+          <Route path="/onboarding" element={<Navigate to="/ingestion" replace />} />
           <Route path="/knowledge" element={<Knowledge />} />
           <Route path="/settings" element={<Settings />} />
         </Route>
