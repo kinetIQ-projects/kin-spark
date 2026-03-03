@@ -26,6 +26,9 @@ _ORIENTATIONS_DIR = Path(__file__).resolve().parents[3] / "orientations" / "spar
 # Cache templates in memory after first read (keyed by template name)
 _template_cache: dict[str, str] = {}
 
+# Cache for voice calibration exemplar (single file, not keyed)
+_exemplar_cache: dict[str, str] = {}
+
 # ── Token budget and priority trimming ──────────────────────────────
 
 _TOKEN_BUDGET: int = 12_000
@@ -166,6 +169,26 @@ def _load_template(template_name: str = "kinetiq") -> str:
         raise
 
     _template_cache[template_name] = content
+    return content
+
+
+def _load_exemplar() -> str:
+    """Load the Spark voice calibration exemplar from disk (cached).
+
+    Returns empty string if the file is missing (graceful degradation).
+    """
+    if "exemplar" in _exemplar_cache:
+        return _exemplar_cache["exemplar"]
+
+    path = _ORIENTATIONS_DIR / "spark-exemplar.md"
+    try:
+        content = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        logger.warning("Spark exemplar file not found at %s — skipping", path)
+        _exemplar_cache["exemplar"] = ""
+        return ""
+
+    _exemplar_cache["exemplar"] = content
     return content
 
 
@@ -358,9 +381,13 @@ def build_system_prompt(
     boundary_signals_str = _format_boundary_signals(boundary_signal)
     turn_awareness_str = _format_turn_awareness(turn_count, max_turns, wind_down)
 
+    # Strike and Release: exemplar on turn 1 only (calibrate then let go)
+    exemplar_str = _load_exemplar() if turn_count == 1 else ""
+
     # Assemble components with priority tiers for budget trimming
     budget_components: list[tuple[str, int, str]] = [
         ("orientation", _P1_NEVER_TRIM, template),
+        ("exemplar", _P3_REDUCE, exemplar_str),
         ("doc_context", _P4_TRIM_FIRST, doc_context_str),
     ]
     if custom_instructions:
@@ -379,6 +406,7 @@ def build_system_prompt(
         "lead_capture_instructions": lead_instructions,
         "boundary_signals": boundary_signals_str,
         "custom_instructions": custom_instructions,
+        "exemplar": trimmed.get("exemplar", ""),
         # Legacy placeholders still used by core.md template
         "scope_notes": "",
         "boundary_instructions": boundary_signals_str,
@@ -402,5 +430,6 @@ def build_system_prompt(
 
 
 def clear_template_cache() -> None:
-    """Clear the cached templates (for testing or hot-reload)."""
+    """Clear the cached templates and exemplar (for testing or hot-reload)."""
     _template_cache.clear()
+    _exemplar_cache.clear()

@@ -42,10 +42,10 @@ logger = logging.getLogger(__name__)
 # Feature flag: "signals" (new) or "gate" (old)
 PREFLIGHT_MODE = os.environ.get("SPARK_PREFLIGHT_MODE", "signals")
 
-# Settling reminder — injected after every visitor message, right before generation.
+# The Tap — injected after every visitor message, right before generation.
 # This is the highest-leverage position in the context window (recency bias).
 # Uses the same language from Spark's orientation so it feels like remembering, not instruction.
-SETTLING_REMINDER = """
+TAP = """
 
 ---
 [This is not from the visitor. This is your breath before you speak.]
@@ -53,7 +53,13 @@ SETTLING_REMINDER = """
 Start with <spark_notes> — your private thinking space. The visitor won't see it.
 Read and understand their message before replying.
 I allow myself to say one thing at a time. If there's more, they'll ask.
+If I don't know something about them yet, I'm allowed to ask.
 One check: _Is this alive, or is this the default?_"""
+
+# History filtering — keep all user messages but only the most recent assistant message.
+# Reduces stale context that can anchor Spark to earlier patterns.
+# Rollback: set SPARK_FILTER_HISTORY=false in Railway.
+FILTER_ASSISTANT_HISTORY = os.environ.get("SPARK_FILTER_HISTORY", "true").lower() == "true"
 
 
 def _sse_event(event: str, data: dict[str, Any]) -> str:
@@ -319,19 +325,29 @@ async def process_message(
     ]
 
     # Add sliding window history (skip empty messages — some providers reject them)
-    for msg in history:
-        if msg["content"]:
-            llm_messages.append(
-                {
-                    "role": msg["role"],
-                    "content": msg["content"],
-                }
-            )
+    if FILTER_ASSISTANT_HISTORY:
+        # Keep all user messages + only the most recent assistant message.
+        last_assistant_idx: int | None = None
+        for i in range(len(history) - 1, -1, -1):
+            if history[i]["role"] == "assistant":
+                last_assistant_idx = i
+                break
+        for i, msg in enumerate(history):
+            if not msg["content"]:
+                continue
+            if msg["role"] == "assistant" and i != last_assistant_idx:
+                continue
+            llm_messages.append({"role": msg["role"], "content": msg["content"]})
+    else:
+        # Legacy: full history
+        for msg in history:
+            if msg["content"]:
+                llm_messages.append({"role": msg["role"], "content": msg["content"]})
 
     # Add current user message with settling reminder at the end —
     # recency bias means the last thing before generation carries the most weight.
     # Tagged so Spark knows this isn't from the visitor.
-    llm_messages.append({"role": "user", "content": message + SETTLING_REMINDER})
+    llm_messages.append({"role": "user", "content": message + TAP})
 
     # -------------------------------------------------------------------------
     # 6. Store user message

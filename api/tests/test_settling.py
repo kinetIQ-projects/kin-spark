@@ -21,6 +21,7 @@ from app.services.spark.settling import (
     _estimate_tokens,
     _format_boundary_signals,
     _format_doc_context,
+    _load_exemplar,
     _trim_component,
     _trim_to_budget,
     build_system_prompt,
@@ -33,6 +34,7 @@ _MINIMAL_TEMPLATE = (
     "{timestamp}\n"
     "{company_name}\n"
     "{company_description}\n"
+    "{exemplar}\n"
     "{turn_awareness}\n"
     "{doc_context}\n"
     "{lead_capture_instructions}\n"
@@ -51,15 +53,18 @@ def _build(
     boundary_signal: str | None = None,
     retrieved_chunks: list | None = None,  # type: ignore[type-arg]
     orientation_text: str | None = None,
+    turn_count: int = 1,
 ) -> str:
     """Call build_system_prompt with minimal args, return the result."""
     with patch(
         "app.services.spark.settling._load_template", return_value=_MINIMAL_TEMPLATE
+    ), patch(
+        "app.services.spark.settling._load_exemplar", return_value=""
     ):
         return build_system_prompt(
             settling_config=settling_config or {},
             retrieved_chunks=retrieved_chunks or [],
-            turn_count=1,
+            turn_count=turn_count,
             max_turns=20,
             wind_down=False,
             boundary_signal=boundary_signal,
@@ -382,6 +387,9 @@ class TestBuildSystemPromptBudget:
         with patch(
             "app.services.spark.settling._load_template",
             return_value=_MINIMAL_TEMPLATE,
+        ), patch(
+            "app.services.spark.settling._load_exemplar",
+            return_value="",
         ):
             result = build_system_prompt(
                 settling_config={},
@@ -392,3 +400,71 @@ class TestBuildSystemPromptBudget:
             )
         assert len(result) > 0
         assert len(result) < 500_000
+
+
+# ── Exemplar (Strike and Release) ────────────────────────────────
+
+
+_FAKE_EXEMPLAR = "# Spark Voice Calibration\nWarmth Without Over-Selling"
+
+
+@pytest.mark.unit
+class TestExemplar:
+    """Strike and Release — exemplar on turn 1 only."""
+
+    def test_exemplar_present_on_turn_1(self) -> None:
+        """Exemplar content appears in prompt when turn_count=1."""
+        with patch(
+            "app.services.spark.settling._load_template",
+            return_value=_MINIMAL_TEMPLATE,
+        ), patch(
+            "app.services.spark.settling._load_exemplar",
+            return_value=_FAKE_EXEMPLAR,
+        ):
+            result = build_system_prompt(
+                settling_config={},
+                retrieved_chunks=[],
+                turn_count=1,
+                max_turns=20,
+                wind_down=False,
+            )
+        assert "Voice Calibration" in result
+        assert "Warmth Without Over-Selling" in result
+
+    def test_exemplar_absent_on_turn_2(self) -> None:
+        """Exemplar empty when turn_count > 1 (release)."""
+        with patch(
+            "app.services.spark.settling._load_template",
+            return_value=_MINIMAL_TEMPLATE,
+        ), patch(
+            "app.services.spark.settling._load_exemplar",
+            return_value=_FAKE_EXEMPLAR,
+        ):
+            result = build_system_prompt(
+                settling_config={},
+                retrieved_chunks=[],
+                turn_count=2,
+                max_turns=20,
+                wind_down=False,
+            )
+        assert "Voice Calibration" not in result
+
+    def test_exemplar_missing_file_graceful(self) -> None:
+        """Missing exemplar file returns empty string, no crash."""
+        clear_template_cache()
+        with patch(
+            "app.services.spark.settling._ORIENTATIONS_DIR",
+            MagicMock(**{"__truediv__": lambda self, x: MagicMock(
+                read_text=MagicMock(side_effect=FileNotFoundError)
+            )}),
+        ):
+            result = _load_exemplar()
+        assert result == ""
+
+    def test_exemplar_cache_cleared(self) -> None:
+        """clear_template_cache() clears exemplar cache too."""
+        from app.services.spark.settling import _exemplar_cache
+
+        _exemplar_cache["exemplar"] = "cached value"
+        clear_template_cache()
+        assert "exemplar" not in _exemplar_cache
