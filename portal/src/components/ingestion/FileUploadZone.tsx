@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Upload, FileText, AlertCircle } from "lucide-react";
+import { Upload, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/api";
 import { supabase } from "@/lib/supabase";

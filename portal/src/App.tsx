@@ -8,7 +8,6 @@ import { Conversations } from "@/pages/Conversations";
 import { ConversationDetail } from "@/pages/ConversationDetail";
 import { Leads } from "@/pages/Leads";
 import { Knowledge } from "@/pages/Knowledge";
-import { Onboarding } from "@/pages/Onboarding";
 import { Ingestion } from "@/pages/Ingestion";
 import { Settings } from "@/pages/Settings";
 

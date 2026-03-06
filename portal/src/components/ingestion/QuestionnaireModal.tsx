@@ -5,7 +5,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { apiFetch } from "@/lib/api";
 import { toast } from "@/components/ui/toaster";
 import { QuestionnaireStep } from "./QuestionnaireStep";
-import type { OnboardingData, OnboardingCustomerProfile } from "@/lib/types";
+import type { OnboardingData } from "@/lib/types";
 
 // ── Flat question list ────────────────────────────────────────────
 

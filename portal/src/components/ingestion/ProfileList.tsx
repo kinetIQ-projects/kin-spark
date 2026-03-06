@@ -3,12 +3,19 @@ import { FileText, ChevronDown, ChevronUp, Check, MessageSquare } from "lucide-r
 import type { Profile } from "@/lib/types";
 import { PROFILE_TYPE_LABELS } from "@/lib/types";
 
-const STATUS_BADGES: Record<string, { label: string; className: string }> = {
+interface BadgeEntry {
+  label: string;
+  className: string;
+}
+
+const STATUS_BADGES: Record<string, BadgeEntry> = {
   draft: { label: "Draft", className: "bg-yellow-100 text-yellow-800" },
   pending_review: { label: "Pending Review", className: "bg-blue-100 text-blue-800" },
   approved: { label: "Approved", className: "bg-green-100 text-green-800" },
   rejected: { label: "Changes Requested", className: "bg-red-100 text-red-800" },
 };
+
+const DEFAULT_BADGE: BadgeEntry = STATUS_BADGES["draft"]!;
 
 interface ProfileListProps {
   profiles: Profile[];
@@ -46,7 +53,7 @@ export function ProfileList({
     <div className="space-y-2">
       {profiles.map((profile) => {
         const isExpanded = expandedId === profile.id;
-        const badge = STATUS_BADGES[profile.status] ?? STATUS_BADGES.draft;
+        const badge = STATUS_BADGES[profile.status] ?? DEFAULT_BADGE;
         const label =
           PROFILE_TYPE_LABELS[profile.profile_type] ?? profile.profile_type;
         const showActions = profile.status !== "approved" && onApprove;

@@ -3,15 +3,20 @@ import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/utils";
 import type { FileUpload } from "@/lib/types";
 
-const STATUS_CONFIG: Record<
-  string,
-  { label: string; color: string; icon: typeof Check }
-> = {
+interface StatusEntry {
+  label: string;
+  color: string;
+  icon: typeof Check;
+}
+
+const STATUS_CONFIG: Record<string, StatusEntry> = {
   uploaded: { label: "Uploaded", color: "text-muted-foreground", icon: Loader2 },
   parsing: { label: "Parsing...", color: "text-yellow-600", icon: Loader2 },
   parsed: { label: "Parsed", color: "text-green-600", icon: Check },
   failed: { label: "Failed", color: "text-destructive", icon: AlertCircle },
 };
+
+const DEFAULT_STATUS: StatusEntry = STATUS_CONFIG["uploaded"]!;
 
 const MIME_ICONS: Record<string, typeof FileText> = {
   "application/pdf": FileText,
@@ -44,7 +49,7 @@ export function FileUploadList({
   return (
     <div className="space-y-2">
       {uploads.map((upload) => {
-        const status = STATUS_CONFIG[upload.status] ?? STATUS_CONFIG.uploaded;
+        const status = STATUS_CONFIG[upload.status] ?? DEFAULT_STATUS;
         const Icon = MIME_ICONS[upload.mime_type] ?? FileText;
         const StatusIcon = status.icon;
 
