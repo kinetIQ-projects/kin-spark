@@ -3,6 +3,10 @@ Spark CRM Integration — Sync leads to HubSpot and/or webhooks.
 
 Uses createOrUpdate (upsert by email) for HubSpot to avoid duplicates.
 Failed syncs are logged and marked for future retry sweep.
+
+Also provides conversation summary generation for lead capture —
+produces a 2-3 sentence summary of what was discussed, stored as the
+lead's notes and forwarded to CRM/webhook integrations.
 """
 
 from __future__ import annotations
@@ -17,8 +21,64 @@ from app.services.supabase import get_supabase_client
 
 logger = logging.getLogger(__name__)
 
+_SUMMARY_PROMPT = """Summarize this conversation between a website visitor and a business assistant in 2-3 sentences. Focus on what the visitor is looking for, any specific details they shared (event type, date, budget, guest count, etc.), and where the conversation left off. Write from a third-person perspective as a note for the business owner. Be specific and concise — no filler.
+
+Conversation:
+{transcript}"""
+
 _HUBSPOT_CONTACTS_URL = "https://api.hubapi.com/crm/v3/objects/contacts"
 _WEBHOOK_TIMEOUT = 10.0
+
+
+async def generate_lead_summary(conversation_id: UUID) -> str | None:
+    """Generate a 2-3 sentence summary of a conversation for lead capture.
+
+    Fetches the full message history and uses the preflight model (Groq Llama)
+    for fast, cheap summarization. Returns None on failure — lead capture
+    should never block on summary generation.
+    """
+    try:
+        sb = await get_supabase_client()
+        result = await (
+            sb.table("spark_messages")
+            .select("role, content")
+            .eq("conversation_id", str(conversation_id))
+            .order("created_at", desc=False)
+            .execute()
+        )
+
+        messages = result.data or []
+        if not messages:
+            return None
+
+        # Build readable transcript
+        transcript_lines: list[str] = []
+        for msg in messages:
+            role = "Visitor" if msg["role"] == "user" else "Assistant"
+            transcript_lines.append(f"{role}: {msg['content']}")
+        transcript = "\n".join(transcript_lines)
+
+        # Use preflight model (Groq Llama) — fast and cheap
+        from app.services import llm
+        from app.config import settings
+
+        summary = await llm.complete(
+            messages=[
+                {
+                    "role": "user",
+                    "content": _SUMMARY_PROMPT.format(transcript=transcript),
+                }
+            ],
+            model=settings.spark_preflight_model,
+            temperature=0.3,
+            max_tokens=200,
+            timeout=10,
+        )
+        return summary.strip() if summary else None
+
+    except Exception as e:
+        logger.warning("Lead summary generation failed: %s", e)
+        return None
 
 
 def _split_name(full_name: str | None) -> tuple[str, str]:
@@ -103,10 +163,22 @@ async def _webhook_post(
     lead_data: dict[str, Any],
     conversation_id: str | None = None,
 ) -> None:
-    """POST lead data to a configured webhook URL."""
-    payload = {**lead_data}
+    """POST lead data to a configured webhook URL.
+
+    Payload is flat and clean for Zapier field mapping:
+      name, email, phone, company_name, summary, conversation_id
+    """
+    payload: dict[str, Any] = {
+        "name": lead_data.get("name"),
+        "email": lead_data.get("email"),
+        "phone": lead_data.get("phone"),
+        "company_name": lead_data.get("company_name"),
+        "summary": lead_data.get("notes"),  # maps to HoneyBook "Project Details"
+    }
     if conversation_id:
         payload["conversation_id"] = conversation_id
+    # Strip None values so Zapier doesn't get null fields
+    payload = {k: v for k, v in payload.items() if v is not None}
 
     async with httpx.AsyncClient() as client:
         resp = await client.post(

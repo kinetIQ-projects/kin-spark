@@ -2,7 +2,8 @@
 Tests for Spark CRM Integration.
 
 Covers: HubSpot upsert (success, 409 conflict, failure), webhook post
-(success, timeout), crm_sync_status updates, skip when no config.
+(success, timeout, payload shape), crm_sync_status updates, skip when
+no config, conversation summary generation.
 """
 
 from __future__ import annotations
@@ -294,3 +295,133 @@ class TestSyncLead:
             )
 
         mock_webhook.assert_called_once()
+
+
+# ===========================================================================
+# TestGenerateLeadSummary
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestGenerateLeadSummary:
+    """Conversation summary generation for lead capture."""
+
+    @pytest.mark.asyncio
+    async def test_generates_summary_from_messages(self) -> None:
+        """Happy path — messages exist, LLM returns summary."""
+        conversation_id = uuid4()
+        mock_messages = [
+            {"role": "user", "content": "Hi, I'm planning a wedding."},
+            {"role": "assistant", "content": "Congratulations! When's the big day?"},
+            {"role": "user", "content": "June 15th, about 120 guests."},
+        ]
+
+        mock_sb = MagicMock()
+        mock_sb.table.return_value.select.return_value.eq.return_value.order.return_value.execute = (
+            AsyncMock(return_value=MagicMock(data=mock_messages))
+        )
+
+        mock_summary = "Visitor is planning a wedding for June 15th with approximately 120 guests."
+
+        with patch.object(crm_mod, "get_supabase_client", AsyncMock(return_value=mock_sb)), \
+             patch("app.services.llm.complete", AsyncMock(return_value=mock_summary)):
+            result = await crm_mod.generate_lead_summary(conversation_id)
+
+        assert result == mock_summary
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_empty_messages(self) -> None:
+        """No messages — returns None."""
+        conversation_id = uuid4()
+
+        mock_sb = MagicMock()
+        mock_sb.table.return_value.select.return_value.eq.return_value.order.return_value.execute = (
+            AsyncMock(return_value=MagicMock(data=[]))
+        )
+
+        with patch.object(crm_mod, "get_supabase_client", AsyncMock(return_value=mock_sb)):
+            result = await crm_mod.generate_lead_summary(conversation_id)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_llm_failure(self) -> None:
+        """LLM failure — returns None (never blocks lead capture)."""
+        conversation_id = uuid4()
+        mock_messages = [
+            {"role": "user", "content": "Hello"},
+        ]
+
+        mock_sb = MagicMock()
+        mock_sb.table.return_value.select.return_value.eq.return_value.order.return_value.execute = (
+            AsyncMock(return_value=MagicMock(data=mock_messages))
+        )
+
+        with patch.object(crm_mod, "get_supabase_client", AsyncMock(return_value=mock_sb)), \
+             patch("app.services.llm.complete", AsyncMock(side_effect=Exception("LLM down"))):
+            result = await crm_mod.generate_lead_summary(conversation_id)
+
+        assert result is None
+
+
+# ===========================================================================
+# TestWebhookPayloadShape
+# ===========================================================================
+
+
+@pytest.mark.unit
+class TestWebhookPayloadShape:
+    """Webhook payload is flat and clean for Zapier mapping."""
+
+    @pytest.mark.asyncio
+    async def test_payload_includes_summary_field(self) -> None:
+        """notes maps to summary in the webhook payload."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+
+        with patch("app.services.spark.crm.httpx.AsyncClient") as MockClient:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            await crm_mod._webhook_post(
+                "https://hooks.zapier.com/test",
+                {
+                    "email": "test@example.com",
+                    "name": "Jane Doe",
+                    "notes": "Visitor is planning a wedding for June 15th.",
+                },
+                conversation_id="conv-123",
+            )
+
+        payload = mock_client.post.call_args[1]["json"]
+        assert payload["email"] == "test@example.com"
+        assert payload["name"] == "Jane Doe"
+        assert payload["summary"] == "Visitor is planning a wedding for June 15th."
+        assert payload["conversation_id"] == "conv-123"
+
+    @pytest.mark.asyncio
+    async def test_payload_strips_none_values(self) -> None:
+        """None fields are stripped from the payload."""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.raise_for_status = MagicMock()
+
+        with patch("app.services.spark.crm.httpx.AsyncClient") as MockClient:
+            mock_client = AsyncMock()
+            mock_client.post = AsyncMock(return_value=mock_response)
+            MockClient.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+            MockClient.return_value.__aexit__ = AsyncMock(return_value=False)
+
+            await crm_mod._webhook_post(
+                "https://hooks.zapier.com/test",
+                {"email": "test@example.com", "name": None, "phone": None, "notes": None},
+            )
+
+        payload = mock_client.post.call_args[1]["json"]
+        assert "email" in payload
+        assert "name" not in payload
+        assert "phone" not in payload
+        assert "summary" not in payload

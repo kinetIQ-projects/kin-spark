@@ -129,9 +129,15 @@ async def spark_lead(
     """Capture a lead from the widget."""
     import asyncio
 
-    from app.services.spark.crm import sync_lead
+    from app.services.spark.crm import generate_lead_summary, sync_lead
 
     sb = await get_supabase_client()
+
+    # Generate conversation summary for the lead notes.
+    # If the widget already sent notes, use those; otherwise auto-generate.
+    notes = body.notes
+    if not notes:
+        notes = await generate_lead_summary(body.conversation_id)
 
     lead_row = (
         await sb.table("spark_leads")
@@ -143,7 +149,7 @@ async def spark_lead(
                 "email": body.email,
                 "phone": body.phone,
                 "company_name": body.company_name,
-                "notes": body.notes,
+                "notes": notes,
             }
         )
         .execute()
@@ -183,7 +189,7 @@ async def spark_lead(
                 "name": body.name,
                 "phone": body.phone,
                 "company_name": body.company_name,
-                "notes": body.notes,
+                "notes": notes,
                 "conversation_id": str(body.conversation_id),
             }
             asyncio.create_task(sync_lead(client.id, _UUID(str(lead_id)), lead_data))
