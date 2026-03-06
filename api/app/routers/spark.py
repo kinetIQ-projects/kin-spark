@@ -1,15 +1,13 @@
 """
-Spark Router — HTTP endpoints for Kin Spark AI Rep.
+Spark Router — HTTP endpoints for the Kin Spark widget.
 
-Endpoints:
+Endpoints (publishable API key auth only):
   POST /spark/chat         — SSE streaming conversation
   POST /spark/lead         — Lead capture from widget
-  GET  /spark/conversations — Admin: list conversations
-  GET  /spark/conversations/{id}/messages — Admin: transcript
-  GET  /spark/leads        — Admin: lead list
-  POST /spark/ingest/text  — Ingest raw text
-  POST /spark/ingest/url   — Scrape and ingest URL
   POST /spark/event        — Widget analytics event
+
+Admin endpoints (conversations, leads, ingestion, knowledge) live in
+admin.py and ingestion.py behind JWT auth. Never expose those here.
 """
 
 from __future__ import annotations
@@ -24,18 +22,13 @@ from fastapi.responses import StreamingResponse
 from app.models.spark import (
     SparkChatRequest,
     SparkClient,
-    SparkConversationSummary,
     SparkEventRequest,
-    SparkIngestTextRequest,
-    SparkIngestUrlRequest,
     SparkLeadCreate,
-    SparkLeadOut,
-    SparkMessageOut,
 )
 from app.services.spark.auth import verify_spark_api_key
 from app.services.spark.core import process_message
 from app.services.spark.rate_limiter import get_rate_limiter
-from app.services.spark.session import create_session, end_session, get_session
+from app.services.spark.session import create_session, get_session
 from app.services.supabase import get_supabase_client
 
 logger = logging.getLogger(__name__)
@@ -225,129 +218,3 @@ async def spark_event(
     ).execute()
 
     return {"status": "recorded"}
-
-
-# =============================================================================
-# ADMIN: CONVERSATIONS
-# =============================================================================
-
-
-@router.get("/conversations")
-async def list_conversations(
-    client: SparkClient = Depends(verify_spark_api_key),
-    limit: int = 50,
-    offset: int = 0,
-) -> list[SparkConversationSummary]:
-    """List conversations for this client (admin)."""
-    sb = await get_supabase_client()
-
-    result = await (
-        sb.table("spark_conversations")
-        .select("*")
-        .eq("client_id", str(client.id))
-        .order("created_at", desc=True)
-        .range(offset, offset + limit - 1)
-        .execute()
-    )
-
-    return [SparkConversationSummary(**row) for row in (result.data or [])]
-
-
-@router.get("/conversations/{conversation_id}/messages")
-async def get_conversation_messages(
-    conversation_id: UUID,
-    client: SparkClient = Depends(verify_spark_api_key),
-) -> list[SparkMessageOut]:
-    """Get messages for a conversation (admin)."""
-    sb = await get_supabase_client()
-
-    # Verify conversation belongs to this client
-    conv = (
-        await sb.table("spark_conversations")
-        .select("client_id")
-        .eq("id", str(conversation_id))
-        .execute()
-    )
-
-    if not conv.data or conv.data[0]["client_id"] != str(client.id):
-        raise HTTPException(status_code=404, detail="Conversation not found")
-
-    result = await (
-        sb.table("spark_messages")
-        .select("*")
-        .eq("conversation_id", str(conversation_id))
-        .order("created_at", desc=False)
-        .execute()
-    )
-
-    return [SparkMessageOut(**row) for row in (result.data or [])]
-
-
-# =============================================================================
-# ADMIN: LEADS
-# =============================================================================
-
-
-@router.get("/leads")
-async def list_leads(
-    client: SparkClient = Depends(verify_spark_api_key),
-    limit: int = 50,
-    offset: int = 0,
-) -> list[SparkLeadOut]:
-    """List leads for this client (admin)."""
-    sb = await get_supabase_client()
-
-    result = await (
-        sb.table("spark_leads")
-        .select("*")
-        .eq("client_id", str(client.id))
-        .order("created_at", desc=True)
-        .range(offset, offset + limit - 1)
-        .execute()
-    )
-
-    return [SparkLeadOut(**row) for row in (result.data or [])]
-
-
-# =============================================================================
-# INGESTION
-# =============================================================================
-
-
-@router.post("/ingest/text")
-async def ingest_text_endpoint(
-    body: SparkIngestTextRequest,
-    client: SparkClient = Depends(verify_spark_api_key),
-) -> dict[str, Any]:
-    """Ingest raw text as knowledge for this client."""
-    from app.services.spark.ingestion import ingest_text
-
-    count = await ingest_text(
-        client_id=client.id,
-        content=body.content,
-        title=body.title,
-        source_type=body.source_type,
-    )
-
-    return {"chunks_inserted": count}
-
-
-@router.post("/ingest/url")
-async def ingest_url_endpoint(
-    body: SparkIngestUrlRequest,
-    client: SparkClient = Depends(verify_spark_api_key),
-) -> dict[str, Any]:
-    """Scrape a URL and ingest its content."""
-    from app.services.spark.ingestion import ingest_url
-
-    try:
-        count = await ingest_url(
-            client_id=client.id,
-            url=body.url,
-            title=body.title,
-        )
-    except Exception as e:
-        logger.error("Spark URL ingestion failed: %s", e)
-        raise HTTPException(status_code=422, detail="Failed to fetch URL")
-
-    return {"chunks_inserted": count}
