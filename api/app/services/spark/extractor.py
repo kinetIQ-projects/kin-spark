@@ -269,6 +269,11 @@ async def extract_artifacts(
 
         prompt = _KB_EXTRACTION_PROMPT.format(chunks=chunks_text)
 
+        logger.info(
+            "KB extraction: sending %d chunks (%d chars) to %s",
+            len(all_chunks), len(chunks_text), settings.pipeline_stage_3_model,
+        )
+
         try:
             response = await llm.complete(
                 messages=[{"role": "user", "content": prompt}],
@@ -279,7 +284,13 @@ async def extract_artifacts(
                 timeout=180,
             )
 
+            logger.info(
+                "KB extraction LLM response: %d chars, preview: %.200s",
+                len(response), response[:200],
+            )
+
             kb_items = _parse_kb_response(response)
+            logger.info("KB extraction parsed %d valid items", len(kb_items))
 
             for item in kb_items:
                 try:
@@ -305,7 +316,7 @@ async def extract_artifacts(
             )
 
         except Exception as e:
-            logger.error("KB extraction failed: %s", e)
+            logger.exception("KB extraction failed for client %s", client_id)
     else:
         logger.info("No classified chunks for client %s, skipping KB extraction", client_id)
 
