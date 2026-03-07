@@ -144,6 +144,82 @@ async def run_pipeline(
             await _mark_cancelled(sb, run_id)
             return
 
+        # ── Embed parsed uploads into spark_documents ─────────────
+        # This makes the raw content searchable during conversations.
+        from app.services.spark.ingestion import ingest_text
+
+        embed_count = 0
+        uploads_to_embed = sources.get("uploads", [])
+        for i, upload in enumerate(uploads_to_embed):
+            parsed = upload.get("parsed_text")
+            if not parsed:
+                continue
+            try:
+                inserted = await ingest_text(
+                    client_id=client_id,
+                    content=parsed,
+                    title=upload.get("original_name"),
+                    source_type=upload.get("source_type", "upload"),
+                )
+                embed_count += inserted
+            except Exception as e:
+                logger.warning(
+                    "Failed to embed upload %s: %s",
+                    upload.get("id"), e,
+                )
+
+        # Embed paste items too
+        for paste in sources.get("paste_items", []):
+            content = paste.get("content")
+            if not content:
+                continue
+            try:
+                inserted = await ingest_text(
+                    client_id=client_id,
+                    content=content,
+                    title=paste.get("title", "Pasted text"),
+                    source_type="paste",
+                )
+                embed_count += inserted
+            except Exception as e:
+                logger.warning(
+                    "Failed to embed paste item %s: %s",
+                    paste.get("id"), e,
+                )
+
+        # Embed questionnaire text
+        questionnaire_text = sources.get("questionnaire_text", "")
+        if questionnaire_text:
+            try:
+                inserted = await ingest_text(
+                    client_id=client_id,
+                    content=questionnaire_text,
+                    title="Onboarding Questionnaire",
+                    source_type="questionnaire",
+                )
+                embed_count += inserted
+            except Exception as e:
+                logger.warning("Failed to embed questionnaire: %s", e)
+
+        logger.info(
+            "Embedded %d document chunks for client %s",
+            embed_count, client_id,
+        )
+
+        await _update_run(
+            sb,
+            run_id,
+            progress={
+                "stage": "gathering",
+                "percent": 100,
+                "message": f"Embedded {embed_count} document chunks",
+            },
+        )
+
+        if await _is_cancelled(sb, run_id):
+            await _mark_cancelled(sb, run_id)
+            return
+
         # ── Stage 0: Scrape ──────────────────────────────────────
         if include_scrape:
             await _update_run(
@@ -193,14 +269,40 @@ async def run_pipeline(
                     .eq("source_type", "scrape")
                     .execute()
                 )
-                sources["uploads"] = (sources.get("uploads") or []) + (scrape_result.data or [])
+                scraped_uploads = scrape_result.data or []
+                sources["uploads"] = (sources.get("uploads") or []) + scraped_uploads
                 sources["upload_count"] = len(sources.get("uploads", []))
+
+                # Embed scraped pages into spark_documents
+                scrape_embed_count = 0
+                for upload in scraped_uploads:
+                    parsed = upload.get("parsed_text")
+                    if not parsed:
+                        continue
+                    try:
+                        inserted = await ingest_text(
+                            client_id=client_id,
+                            content=parsed,
+                            title=upload.get("original_name"),
+                            source_type="scrape",
+                        )
+                        scrape_embed_count += inserted
+                    except Exception as e:
+                        logger.warning(
+                            "Failed to embed scraped page %s: %s",
+                            upload.get("id"), e,
+                        )
+
+                logger.info(
+                    "Embedded %d chunks from %d scraped pages",
+                    scrape_embed_count, scraped_count,
+                )
 
                 await _update_run(
                     sb,
                     run_id,
                     source_summary=source_summary,
-                    progress={"stage": "stage_0_scrape", "percent": 100, "message": f"Scraped {scraped_count} pages"},
+                    progress={"stage": "stage_0_scrape", "percent": 100, "message": f"Scraped {scraped_count} pages, embedded {scrape_embed_count} chunks"},
                 )
             else:
                 logger.warning("Scrape requested but no website_url configured for client %s", client_id)
