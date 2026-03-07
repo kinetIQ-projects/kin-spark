@@ -186,13 +186,82 @@ async def extract_artifacts(
         for signal_type in comparison.split("_vs_"):
             alignment_by_type.setdefault(signal_type, []).append(finding)
 
-    # 5 profile types + 1 KB extraction = 6 total steps
+    # 1 KB extraction + 5 profile types = 6 total steps
+    # KB extraction runs FIRST — it's the most important output.
     total_steps = 6
     completed = 0
     profiles_created = 0
     kb_items_created = 0
 
-    # ── Extract profiles ─────────────────────────────────────────
+    # ── Extract KB items (PRIORITY) ───────────────────────────────
+    # This is what powers Spark during conversations. Run it first
+    # so it succeeds even if profile extraction times out or fails.
+    all_chunks = classified_chunks or []
+    if all_chunks:
+        chunks_text = _format_chunks(all_chunks)
+        chunks_text = chunks_text[:80_000]
+
+        prompt = _KB_EXTRACTION_PROMPT.format(chunks=chunks_text)
+
+        logger.info(
+            "KB extraction: sending %d chunks (%d chars) to %s",
+            len(all_chunks), len(chunks_text), settings.pipeline_stage_3_model,
+        )
+
+        try:
+            response = await llm.complete(
+                messages=[{"role": "user", "content": prompt}],
+                model=settings.pipeline_stage_3_model,
+                temperature=0.2,
+                max_tokens=8000,
+                response_format={"type": "json_object"},
+                timeout=180,
+            )
+
+            logger.info(
+                "KB extraction LLM response: %d chars, preview: %.200s",
+                len(response), response[:200],
+            )
+
+            kb_items = _parse_kb_response(response)
+            logger.info("KB extraction parsed %d valid items", len(kb_items))
+
+            for item in kb_items:
+                try:
+                    await create_knowledge_item(
+                        client_id=client_id,
+                        title=item["title"],
+                        content=item["content"],
+                        category=item["category"],
+                        active=False,  # Client activates during review
+                    )
+                    kb_items_created += 1
+                except Exception as e:
+                    err_str = str(e).lower()
+                    if "409" in err_str or "duplicate" in err_str:
+                        logger.debug("KB item duplicate, skipping: %s", item["title"])
+                    else:
+                        logger.warning("Failed to create KB item '%s': %s", item["title"], e)
+
+            logger.info(
+                "Created %d KB items for client %s",
+                kb_items_created, client_id,
+            )
+
+        except Exception as e:
+            logger.exception("KB extraction failed for client %s", client_id)
+    else:
+        logger.info("No classified chunks for client %s, skipping KB extraction", client_id)
+
+    completed += 1
+    if progress_callback:
+        await progress_callback(
+            completed, total_steps,
+            f"Extracted {kb_items_created} KB items ({completed}/{total_steps})",
+        )
+
+    # ── Extract profiles (secondary) ──────────────────────────────
+    # Reference docs for the portal. Not used in conversations.
     for profile_type, prompt_template in _PROFILE_PROMPTS.items():
         chunks = by_type.get(profile_type, [])
 
@@ -207,10 +276,8 @@ async def extract_artifacts(
             continue
 
         chunks_text = _format_chunks(chunks)
-        # Truncate to stay within token limits (~80K chars ≈ ~20K tokens)
         chunks_text = chunks_text[:80_000]
 
-        # Build alignment notes section
         relevant_findings = alignment_by_type.get(profile_type, [])
         alignment_notes = _format_alignment_notes(relevant_findings)
 
@@ -258,79 +325,6 @@ async def extract_artifacts(
                 completed, total_steps,
                 f"Extracted {profile_type} profile ({completed}/{total_steps})",
             )
-
-    logger.info(
-        "Profile extraction complete: %d profiles. Starting KB extraction...",
-        profiles_created,
-    )
-
-    # ── Extract KB items from ALL chunks ─────────────────────────
-    # FAQs and product info span every signal type (procedures, values,
-    # etc.), not just "facts". Use the full corpus for KB extraction.
-    all_chunks = classified_chunks or []
-    if all_chunks:
-        chunks_text = _format_chunks(all_chunks)
-        chunks_text = chunks_text[:80_000]
-
-        prompt = _KB_EXTRACTION_PROMPT.format(chunks=chunks_text)
-
-        logger.info(
-            "KB extraction: sending %d chunks (%d chars) to %s",
-            len(all_chunks), len(chunks_text), settings.pipeline_stage_3_model,
-        )
-
-        try:
-            response = await llm.complete(
-                messages=[{"role": "user", "content": prompt}],
-                model=settings.pipeline_stage_3_model,
-                temperature=0.2,
-                max_tokens=8000,
-                response_format={"type": "json_object"},
-                timeout=180,
-            )
-
-            logger.info(
-                "KB extraction LLM response: %d chars, preview: %.200s",
-                len(response), response[:200],
-            )
-
-            kb_items = _parse_kb_response(response)
-            logger.info("KB extraction parsed %d valid items", len(kb_items))
-
-            for item in kb_items:
-                try:
-                    await create_knowledge_item(
-                        client_id=client_id,
-                        title=item["title"],
-                        content=item["content"],
-                        category=item["category"],
-                        active=False,  # Client activates during review
-                    )
-                    kb_items_created += 1
-                except Exception as e:
-                    # Duplicate or other error — skip and continue
-                    err_str = str(e).lower()
-                    if "409" in err_str or "duplicate" in err_str:
-                        logger.debug("KB item duplicate, skipping: %s", item["title"])
-                    else:
-                        logger.warning("Failed to create KB item '%s': %s", item["title"], e)
-
-            logger.info(
-                "Created %d KB items for client %s",
-                kb_items_created, client_id,
-            )
-
-        except Exception as e:
-            logger.exception("KB extraction failed for client %s", client_id)
-    else:
-        logger.info("No classified chunks for client %s, skipping KB extraction", client_id)
-
-    completed += 1
-    if progress_callback:
-        await progress_callback(
-            completed, total_steps,
-            f"Extraction complete: {profiles_created} profiles, {kb_items_created} KB items",
-        )
 
     return {
         "profiles_created": profiles_created,
