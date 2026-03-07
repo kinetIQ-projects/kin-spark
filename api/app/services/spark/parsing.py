@@ -4,7 +4,7 @@ Document Parsing Service — Extract text from uploaded files.
 Supports:
   - PDF via pymupdf4llm (markdown-structured output)
   - DOCX via python-docx (paragraphs + tables)
-  - TXT (plain UTF-8)
+  - TXT / Markdown (plain UTF-8)
   - Images via Gemini Flash (vision OCR)
 
 Runs in BackgroundTask after upload confirmation.
@@ -72,7 +72,7 @@ async def parse_upload(upload_id: UUID, client_id: UUID) -> None:
             text, page_count = _parse_pdf(file_bytes)
         elif mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
             text, page_count = _parse_docx(file_bytes)
-        elif mime_type == "text/plain":
+        elif mime_type in ("text/plain", "text/markdown"):
             text, page_count = _parse_txt(file_bytes)
         elif mime_type.startswith("image/"):
             text, page_count = await _parse_image(file_bytes, mime_type)

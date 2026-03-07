@@ -10,6 +10,7 @@ const ALLOWED_TYPES = new Set([
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "text/plain",
+  "text/markdown",
   "image/png",
   "image/jpeg",
   "image/webp",
@@ -148,14 +149,14 @@ export function FileUploadZone({ onUploadComplete }: FileUploadZoneProps) {
                 <input
                   type="file"
                   multiple
-                  accept=".pdf,.docx,.txt,.png,.jpg,.jpeg,.webp"
+                  accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.webp"
                   onChange={handleInputChange}
                   className="sr-only"
                 />
               </label>
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              PDF, DOCX, TXT, PNG, JPG, WEBP — up to 50MB
+              PDF, DOCX, TXT, MD, PNG, JPG, WEBP — up to 50MB
             </p>
           </>
         )}
