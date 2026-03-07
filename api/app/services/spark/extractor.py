@@ -364,10 +364,18 @@ def _format_alignment_notes(findings: list[dict[str, Any]]) -> str:
 
 def _parse_kb_response(response: str) -> list[dict[str, Any]]:
     """Parse and validate the KB extraction response."""
+    # Strip markdown code fences if present (```json ... ```)
+    text = response.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
     try:
-        data = json.loads(response)
+        data = json.loads(text)
     except json.JSONDecodeError:
-        logger.warning("Failed to parse KB extraction JSON")
+        logger.warning("Failed to parse KB extraction JSON: %.200s", text[:200])
         return []
 
     items = data.get("items", [])
