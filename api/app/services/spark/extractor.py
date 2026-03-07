@@ -8,6 +8,8 @@ Produces 6 artifacts from classified chunks using Opus:
   4. ICP Profiles → spark_profiles (type: icp)
   5. Procedure Playbooks → spark_profiles (type: procedures)
   6. Knowledge Base Items → spark_knowledge_items (active: false)
+     Extracted from ALL classified chunks (not just "facts") because
+     FAQs and product info span every signal type.
 
 Where alignment findings identified contradictions relevant to a profile,
 the extractor flags them as annotations — does NOT silently resolve them.
@@ -257,10 +259,12 @@ async def extract_artifacts(
                 f"Extracted {profile_type} profile ({completed}/{total_steps})",
             )
 
-    # ── Extract KB items from facts ──────────────────────────────
-    facts_chunks = by_type.get("facts", [])
-    if facts_chunks:
-        chunks_text = _format_chunks(facts_chunks)
+    # ── Extract KB items from ALL chunks ─────────────────────────
+    # FAQs and product info span every signal type (procedures, values,
+    # etc.), not just "facts". Use the full corpus for KB extraction.
+    all_chunks = classified_chunks or []
+    if all_chunks:
+        chunks_text = _format_chunks(all_chunks)
         chunks_text = chunks_text[:80_000]
 
         prompt = _KB_EXTRACTION_PROMPT.format(chunks=chunks_text)
@@ -303,7 +307,7 @@ async def extract_artifacts(
         except Exception as e:
             logger.error("KB extraction failed: %s", e)
     else:
-        logger.info("No facts chunks for client %s, skipping KB extraction", client_id)
+        logger.info("No classified chunks for client %s, skipping KB extraction", client_id)
 
     completed += 1
     if progress_callback:
