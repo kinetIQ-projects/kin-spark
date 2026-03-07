@@ -78,9 +78,9 @@ class Settings(BaseSettings):
         "image/jpeg,"
         "image/webp"
     )
-    pipeline_stage_1_model: str = "anthropic/claude-sonnet-4-6"
-    pipeline_stage_2_model: str = "anthropic/claude-sonnet-4-6"
-    pipeline_stage_3_model: str = "anthropic/claude-sonnet-4-6"
+    pipeline_stage_1_model: str = "gemini/gemini-3-flash-preview"
+    pipeline_stage_2_model: str = "gemini/gemini-3-flash-preview"
+    pipeline_stage_3_model: str = "gemini/gemini-3-flash-preview"
 
     # ==========================================================================
     # CORS
