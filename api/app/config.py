@@ -79,8 +79,8 @@ class Settings(BaseSettings):
         "image/webp"
     )
     pipeline_stage_1_model: str = "anthropic/claude-sonnet-4-6"
-    pipeline_stage_2_model: str = "anthropic/claude-opus-4-6"
-    pipeline_stage_3_model: str = "anthropic/claude-opus-4-6"
+    pipeline_stage_2_model: str = "anthropic/claude-sonnet-4-6"
+    pipeline_stage_3_model: str = "anthropic/claude-sonnet-4-6"
 
     # ==========================================================================
     # CORS

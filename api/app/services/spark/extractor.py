@@ -259,6 +259,11 @@ async def extract_artifacts(
                 f"Extracted {profile_type} profile ({completed}/{total_steps})",
             )
 
+    logger.info(
+        "Profile extraction complete: %d profiles. Starting KB extraction...",
+        profiles_created,
+    )
+
     # ── Extract KB items from ALL chunks ─────────────────────────
     # FAQs and product info span every signal type (procedures, values,
     # etc.), not just "facts". Use the full corpus for KB extraction.
