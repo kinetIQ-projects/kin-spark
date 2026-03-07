@@ -16,6 +16,12 @@ const ALLOWED_TYPES = new Set([
   "image/webp",
 ]);
 
+// Browsers often report "" for .md files — map by extension as fallback
+const EXT_TO_MIME: Record<string, string> = {
+  ".md": "text/markdown",
+  ".txt": "text/plain",
+};
+
 const MAX_SIZE = 50_000_000; // 50MB
 
 interface FileUploadZoneProps {
@@ -37,8 +43,12 @@ export function FileUploadZone({ onUploadComplete }: FileUploadZoneProps) {
 
       for (const file of fileList) {
         try {
+          // Resolve MIME — browsers return "" for .md files
+          const ext = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
+          const mime = file.type || EXT_TO_MIME[ext] || "";
+
           // Validate client-side
-          if (!ALLOWED_TYPES.has(file.type)) {
+          if (!ALLOWED_TYPES.has(mime)) {
             toast(`Unsupported file type: ${file.name}`, "destructive");
             continue;
           }
@@ -54,7 +64,7 @@ export function FileUploadZone({ onUploadComplete }: FileUploadZoneProps) {
               method: "POST",
               body: JSON.stringify({
                 filename: file.name,
-                mime_type: file.type,
+                mime_type: mime,
                 file_size: file.size,
               }),
             }
@@ -64,7 +74,7 @@ export function FileUploadZone({ onUploadComplete }: FileUploadZoneProps) {
           const { error: storageError } = await supabase.storage
             .from("spark-uploads")
             .upload(presign.storage_path, file, {
-              contentType: file.type,
+              contentType: mime,
               upsert: false,
             });
 
