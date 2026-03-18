@@ -373,7 +373,7 @@ def build_system_prompt(
     ]
     if calendly_link:
         lead_parts.append(
-            f"If they'd like to schedule a call directly: {calendly_link}"
+            f"After collecting their name and email, share the booking link: {calendly_link}"
         )
     lead_instructions = "\n".join(lead_parts)
 
