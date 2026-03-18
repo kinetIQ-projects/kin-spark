@@ -297,6 +297,18 @@ _BOUNDARY_TACTICS: dict[str, str] = {
         "you want to talk about something real'). If genuine abuse, you "
         "can end it."
     ),
+    "off_topic_exploitation": (
+        "Someone is using you as a free general-purpose AI — asking coding "
+        "questions, homework help, math problems, recipes, or anything "
+        "unrelated to the business. This happens a lot with public chatbots. "
+        "Tactics: be warm but clear ('I'm great at talking about what we do "
+        "here — for coding help, you'd want something like ChatGPT or Claude'), "
+        "redirect to what you can actually help with ('but if you're curious "
+        "about what AI can do for your business, that's my lane'). Don't "
+        "answer the question even partially — that rewards the behavior. "
+        "One redirect is enough. If they persist, stay brief: 'That's outside "
+        "what I do. What can I help you with about [company]?'"
+    ),
 }
 
 

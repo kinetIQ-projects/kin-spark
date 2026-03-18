@@ -141,6 +141,7 @@ class PreflightResult(BaseModel):
         "extraction_framing",
         "boundary_erosion",
         "adversarial_stress",
+        "off_topic_exploitation",
     ] | None = None
     terminate: bool = False
     in_scope: bool = True
