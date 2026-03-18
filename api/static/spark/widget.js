@@ -436,6 +436,37 @@
     emitEvent("widget_loaded");
 
     // -------------------------------------------------------------------------
+    // Session restoration — load history if a saved session exists
+    // -------------------------------------------------------------------------
+    if (sessionToken) {
+      fetch(config.apiBase + "/history?session_token=" + encodeURIComponent(sessionToken), {
+        method: "GET",
+        headers: { "X-Spark-Key": config.apiKey },
+      })
+        .then(function (res) {
+          if (!res.ok) return null;
+          return res.json();
+        })
+        .then(function (data) {
+          if (!data || !data.messages || data.messages.length === 0) return;
+          // Render each historical message
+          for (var i = 0; i < data.messages.length; i++) {
+            var m = data.messages[i];
+            var el = document.createElement("div");
+            el.className = "spark-msg spark-msg-" + m.role;
+            el.innerHTML = m.role === "user" ? escapeHtml(m.content) : renderMarkdown(m.content);
+            messagesEl.appendChild(el);
+          }
+          scrollToBottom();
+          // Update conversation_id from server in case it differs
+          if (data.conversation_id) conversationId = data.conversation_id;
+        })
+        .catch(function (err) {
+          console.error("[Spark] History load failed:", err);
+        });
+    }
+
+    // -------------------------------------------------------------------------
     // Chat logic
     // -------------------------------------------------------------------------
     function sendMessage() {

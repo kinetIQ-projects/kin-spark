@@ -3,6 +3,7 @@ Spark Router — HTTP endpoints for the Kin Spark widget.
 
 Endpoints (publishable API key auth only):
   POST /spark/chat         — SSE streaming conversation
+  GET  /spark/history      — Load conversation history for existing session
   POST /spark/lead         — Lead capture from widget
   POST /spark/event        — Widget analytics event
 
@@ -16,7 +17,7 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
 from app.models.spark import (
@@ -28,7 +29,7 @@ from app.models.spark import (
 from app.services.spark.auth import verify_spark_api_key
 from app.services.spark.core import process_message
 from app.services.spark.rate_limiter import get_rate_limiter
-from app.services.spark.session import create_session, get_session
+from app.services.spark.session import create_session, get_session, get_history
 from app.services.supabase import get_supabase_client
 
 logger = logging.getLogger(__name__)
@@ -114,6 +115,41 @@ async def spark_chat(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# =============================================================================
+# HISTORY (session restoration)
+# =============================================================================
+
+
+@router.get("/history")
+async def spark_history(
+    request: Request,
+    session_token: str = Query(..., min_length=1),
+    client: SparkClient = Depends(verify_spark_api_key),
+) -> dict[str, Any]:
+    """Return conversation messages for an existing session.
+
+    Used by the widget on mount to restore conversation history after
+    page refresh or navigation. Returns messages oldest-first.
+    """
+    ip = _get_client_ip(request)
+
+    session = await get_session(session_token, ip)
+    if session is None:
+        return {"messages": [], "conversation_id": None}
+
+    conversation_id = session["id"]
+    messages = await get_history(UUID(conversation_id), limit=50)
+
+    # Strip created_at (widget doesn't need it), keep role + content
+    cleaned = [{"role": m["role"], "content": m["content"]} for m in messages]
+
+    return {
+        "messages": cleaned,
+        "conversation_id": conversation_id,
+        "turns_remaining": client.max_turns - session["turn_count"],
+    }
 
 
 # =============================================================================
