@@ -27,8 +27,11 @@ Conversation:
 {transcript}"""
 
 _HUBSPOT_CONTACTS_URL = "https://api.hubapi.com/crm/v3/objects/contacts"
-_HUBSPOT_NOTES_URL = "https://api.hubapi.com/crm/v3/objects/notes"
+_HUBSPOT_PROPERTIES_URL = "https://api.hubapi.com/crm/v3/properties/contacts"
 _WEBHOOK_TIMEOUT = 10.0
+
+# Module-level flag — ensure custom property exists once per process
+_property_ensured = False
 
 
 async def generate_lead_summary(conversation_id: UUID) -> str | None:
@@ -92,6 +95,47 @@ def _split_name(full_name: str | None) -> tuple[str, str]:
     return (first, last)
 
 
+async def _ensure_summary_property(api_key: str) -> None:
+    """Create kin_spark_summary custom property if it doesn't exist.
+
+    Called once per process. 409 (already exists) is expected and ignored.
+    """
+    global _property_ensured
+    if _property_ensured:
+        return
+
+    payload = {
+        "name": "kin_spark_summary",
+        "label": "Kin Spark Summary",
+        "type": "string",
+        "fieldType": "textarea",
+        "groupName": "contactinformation",
+        "description": "Conversation summary from Kin Spark chat widget",
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                _HUBSPOT_PROPERTIES_URL,
+                json=payload,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=_WEBHOOK_TIMEOUT,
+            )
+            if resp.status_code == 409:
+                logger.debug("kin_spark_summary property already exists")
+            else:
+                resp.raise_for_status()
+                logger.info("Created kin_spark_summary custom property in HubSpot")
+    except Exception as e:
+        logger.warning("Failed to ensure kin_spark_summary property: %s", e)
+        return
+
+    _property_ensured = True
+
+
 async def _hubspot_upsert_contact(
     api_key: str,
     lead_data: dict[str, Any],
@@ -104,6 +148,9 @@ async def _hubspot_upsert_contact(
     if not email:
         logger.warning("HubSpot sync skipped: no email on lead")
         return None
+
+    # Ensure custom property exists before first write
+    await _ensure_summary_property(api_key)
 
     firstname, lastname = _split_name(lead_data.get("name"))
 
@@ -119,6 +166,8 @@ async def _hubspot_upsert_contact(
         properties["company"] = lead_data["company_name"]
     if lead_data.get("phone"):
         properties["phone"] = lead_data["phone"]
+    if lead_data.get("notes"):
+        properties["kin_spark_summary"] = lead_data["notes"]
 
     payload: dict[str, Any] = {
         "properties": properties,
@@ -164,47 +213,6 @@ async def _hubspot_upsert_contact(
             contact_id = resp.json().get("id")
             logger.info("HubSpot contact created for %s (id=%s)", email, contact_id)
             return contact_id
-
-
-async def _hubspot_create_note(
-    api_key: str,
-    contact_id: str,
-    note_body: str,
-) -> None:
-    """Create a note in HubSpot associated with a contact.
-
-    Uses inline association (associationTypeId 202 = note-to-contact).
-    Non-fatal — caller should catch exceptions.
-    """
-    payload: dict[str, Any] = {
-        "properties": {
-            "hs_note_body": note_body,
-        },
-        "associations": [
-            {
-                "to": {"id": contact_id},
-                "types": [
-                    {
-                        "associationCategory": "HUBSPOT_DEFINED",
-                        "associationTypeId": 202,
-                    }
-                ],
-            }
-        ],
-    }
-
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            _HUBSPOT_NOTES_URL,
-            json=payload,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            timeout=_WEBHOOK_TIMEOUT,
-        )
-        resp.raise_for_status()
-        logger.info("HubSpot note created for contact %s", contact_id)
 
 
 async def _webhook_post(
@@ -303,20 +311,7 @@ async def sync_lead(
 
         if hubspot_key:
             try:
-                contact_id = await _hubspot_upsert_contact(hubspot_key, lead_data)
-                # Create a note with conversation summary if we got a contact ID
-                if contact_id and lead_data.get("notes"):
-                    try:
-                        await _hubspot_create_note(
-                            hubspot_key, contact_id, lead_data["notes"]
-                        )
-                    except Exception as note_err:
-                        # Note failure is non-fatal — contact was already created
-                        logger.warning(
-                            "HubSpot note creation failed for contact %s: %s",
-                            contact_id,
-                            note_err,
-                        )
+                await _hubspot_upsert_contact(hubspot_key, lead_data)
             except Exception as e:
                 errors.append(f"HubSpot: {e}")
 
