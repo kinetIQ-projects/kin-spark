@@ -454,7 +454,13 @@
           return res.json();
         })
         .then(function (data) {
-          if (!data || !data.messages || data.messages.length === 0) return;
+          if (!data || !data.messages || data.messages.length === 0) {
+            // Session expired or invalid — clear stale token
+            sessionToken = null;
+            conversationId = null;
+            try { localStorage.removeItem(SESSION_KEY); } catch (_) {}
+            return;
+          }
           // Render each historical message
           for (var i = 0; i < data.messages.length; i++) {
             var m = data.messages[i];
