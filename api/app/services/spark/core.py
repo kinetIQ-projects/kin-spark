@@ -37,7 +37,17 @@ from app.services.spark.session import (
 )
 from app.services.spark.settling import build_system_prompt
 
+from app.services.spark.crm import generate_lead_summary, sync_lead
+
 logger = logging.getLogger(__name__)
+
+# Email regex — used for fallback lead detection in user messages
+_EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+
+# Lead data tag regex — matches <lead_data>{...}</lead_data> inside response
+_LEAD_TAG_RE = re.compile(
+    r"<lead_data>\s*(\{.*?\})\s*</lead_data>", re.DOTALL
+)
 
 # Feature flag: "signals" (new) or "gate" (old)
 PREFLIGHT_MODE = os.environ.get("SPARK_PREFLIGHT_MODE", "signals")
@@ -172,6 +182,119 @@ async def _get_boundary_count(conversation_id: UUID) -> int:
     except Exception as e:
         logger.warning("Spark boundary count fetch failed: %s", e)
     return 0
+
+
+def _extract_lead_tag(full_response: str) -> dict[str, str] | None:
+    """Extract <lead_data> JSON from the raw LLM response.
+
+    Scans before spark_notes stripping so the tag is still present.
+    Returns parsed dict with at least 'email', or None.
+    """
+    match = _LEAD_TAG_RE.search(full_response)
+    if not match:
+        return None
+    try:
+        data = json.loads(match.group(1))
+        if not data.get("email"):
+            return None
+        return data
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def _fallback_email_scan(recent_user_messages: list[str]) -> dict[str, str] | None:
+    """Scan recent user messages for email addresses.
+
+    Returns a minimal dict with the email if found, None otherwise.
+    The caller can optionally enrich with LLM extraction.
+    """
+    for msg in reversed(recent_user_messages):
+        match = _EMAIL_RE.search(msg)
+        if match:
+            return {"email": match.group(0)}
+    return None
+
+
+async def _capture_conversational_lead(
+    client_id: UUID,
+    conversation_id: UUID,
+    lead_data: dict[str, str],
+) -> None:
+    """Fire-and-forget: insert conversational lead, generate summary, sync to CRM.
+
+    Deduplicates by conversation_id — if a lead already exists for this
+    conversation, skips silently.
+    """
+    try:
+        from app.services.supabase import get_supabase_client
+
+        sb = await get_supabase_client()
+
+        # Dedup check — one lead per conversation
+        existing = (
+            await sb.table("spark_leads")
+            .select("id")
+            .eq("conversation_id", str(conversation_id))
+            .limit(1)
+            .execute()
+        )
+        if existing.data:
+            logger.debug(
+                "Lead already exists for conversation %s, skipping", conversation_id
+            )
+            return
+
+        # Generate summary
+        summary = await generate_lead_summary(conversation_id)
+
+        # Insert lead
+        lead_row = {
+            "client_id": str(client_id),
+            "conversation_id": str(conversation_id),
+            "email": lead_data.get("email"),
+            "name": lead_data.get("name"),
+            "phone": lead_data.get("phone"),
+            "company_name": lead_data.get("company"),
+            "notes": summary,
+            "source": "conversational",
+        }
+        result = await sb.table("spark_leads").insert(lead_row).execute()
+        if not result.data:
+            logger.warning("Conversational lead insert returned no data")
+            return
+
+        lead_id = result.data[0]["id"]
+        logger.info(
+            "Conversational lead captured: %s (conversation %s)",
+            lead_id,
+            conversation_id,
+        )
+
+        # Set conversation outcome
+        await (
+            sb.table("spark_conversations")
+            .update({"outcome": "lead_captured"})
+            .eq("id", str(conversation_id))
+            .execute()
+        )
+
+        # Analytics
+        await _emit_analytics(
+            client_id,
+            conversation_id,
+            "lead_captured",
+            {"source": "conversational"},
+        )
+
+        # Sync to CRM (fire-and-forget within fire-and-forget)
+        lead_data_for_sync = {
+            **lead_row,
+            "conversation_id": str(conversation_id),
+        }
+        await sync_lead(client_id, UUID(lead_id), lead_data_for_sync)
+
+    except Exception as e:
+        logger.error("Conversational lead capture failed: %s", e)
 
 
 async def process_message(
@@ -416,9 +539,37 @@ async def process_message(
 
     await store_message(conversation_id, "assistant", normalized)
 
-    # Wind-down event
+    # -------------------------------------------------------------------------
+    # 9. Conversational lead detection (zero streaming latency — runs after store)
+    # -------------------------------------------------------------------------
+    lead_captured = False
+
+    # Try tag extraction first (Spark emitted <lead_data> in spark_notes)
+    lead_data = _extract_lead_tag(full_response)
+
+    # Fallback: scan recent user messages for email patterns
+    if lead_data is None:
+        recent_user_msgs = [
+            m["content"] for m in history if m["role"] == "user"
+        ][-3:]
+        # Include the current message
+        recent_user_msgs.append(message)
+        lead_data = _fallback_email_scan(recent_user_msgs)
+
+    if lead_data is not None:
+        lead_captured = True
+        asyncio.create_task(
+            _capture_conversational_lead(client_id, conversation_id, lead_data)
+        )
+
+    # Wind-down event — suppress form if lead was already captured conversationally
     if wind_down:
-        yield _sse_event("wind_down", {"turns_remaining": turns_remaining})
+        if lead_captured:
+            yield _sse_event(
+                "lead_already_captured", {"turns_remaining": turns_remaining}
+            )
+        else:
+            yield _sse_event("wind_down", {"turns_remaining": turns_remaining})
 
     # Analytics (fire-and-forget)
     event_meta: dict[str, Any] = {}

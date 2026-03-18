@@ -499,6 +499,8 @@
               leadForm.classList.add("visible");
             }, 500);
             break;
+          case "lead_already_captured":
+            break;
           case "done":
             break;
           case "error":

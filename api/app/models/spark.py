@@ -65,7 +65,7 @@ class SparkEventRequest(BaseModel):
 class SparkChatEvent(BaseModel):
     """SSE event sent back to widget."""
 
-    event: Literal["session", "token", "wind_down", "done", "error"]
+    event: Literal["session", "token", "wind_down", "lead_already_captured", "done", "error"]
     data: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -102,6 +102,7 @@ class SparkLeadOut(BaseModel):
     phone: str | None
     company_name: str | None = None
     notes: str | None
+    source: str | None = "form"
     created_at: datetime
 
 

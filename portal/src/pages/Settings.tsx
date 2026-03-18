@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Globe, Check } from "lucide-react";
+import { Globe, Check, Calendar, Link2 } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import type { ClientProfile, SettingsUpdate } from "@/lib/types";
 import { toast } from "@/components/ui/toaster";
@@ -39,8 +39,14 @@ export function Settings() {
 
   const currentTimezone =
     (profile.data?.settling_config?.timezone as string) || "UTC";
+  const currentCalendly =
+    (profile.data?.settling_config?.calendly_link as string) || "";
+  const currentHubspot =
+    (profile.data?.settling_config?.hubspot_api_key as string) || "";
 
   const [selectedTz, setSelectedTz] = useState(currentTimezone);
+  const [calendlyLink, setCalendlyLink] = useState(currentCalendly);
+  const [hubspotKey, setHubspotKey] = useState(currentHubspot);
   const [dirty, setDirty] = useState(false);
 
   // Sync when profile loads
@@ -49,6 +55,12 @@ export function Settings() {
       const tz =
         (profile.data.settling_config?.timezone as string) || "UTC";
       setSelectedTz(tz);
+      setCalendlyLink(
+        (profile.data.settling_config?.calendly_link as string) || ""
+      );
+      setHubspotKey(
+        (profile.data.settling_config?.hubspot_api_key as string) || ""
+      );
       setDirty(false);
     }
   }, [profile.data]);
@@ -82,7 +94,7 @@ export function Settings() {
     onSuccess: (data) => {
       queryClient.setQueryData(["profile"], data);
       setDirty(false);
-      toast("Timezone updated");
+      toast("Settings saved");
     },
     onError: () => {
       toast("Failed to save settings", "destructive");
@@ -90,7 +102,17 @@ export function Settings() {
   });
 
   function handleSave() {
-    saveMutation.mutate({ timezone: selectedTz });
+    const update: SettingsUpdate = {};
+    if (selectedTz !== currentTimezone) update.timezone = selectedTz;
+    if (calendlyLink !== currentCalendly) update.calendly_link = calendlyLink;
+    if (hubspotKey !== currentHubspot) update.hubspot_api_key = hubspotKey;
+    saveMutation.mutate(update);
+  }
+
+  function checkDirty(tz: string, cal: string, hs: string) {
+    setDirty(
+      tz !== currentTimezone || cal !== currentCalendly || hs !== currentHubspot
+    );
   }
 
   if (profile.isLoading) {
@@ -132,7 +154,7 @@ export function Settings() {
             value={selectedTz}
             onChange={(e) => {
               setSelectedTz(e.target.value);
-              setDirty(e.target.value !== currentTimezone);
+              checkDirty(e.target.value, calendlyLink, hubspotKey);
             }}
             className="mt-3 h-9 w-full rounded-md border bg-background px-3 text-sm"
           >
@@ -152,27 +174,78 @@ export function Settings() {
             </optgroup>
           </select>
 
-          <div className="mt-4 flex items-center gap-3">
-            <button
-              onClick={handleSave}
-              disabled={!dirty || saveMutation.isPending}
-              className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
-            >
-              {saveMutation.isPending ? (
-                "Saving..."
-              ) : (
-                <>
-                  <Check className="h-3.5 w-3.5" />
-                  Save
-                </>
-              )}
-            </button>
-            {!dirty && profile.data && (
-              <span className="text-xs text-muted-foreground">
-                Current: {formatTzLabel(currentTimezone)}
-              </span>
-            )}
+        </div>
+        {/* Calendly Link */}
+        <div className="rounded-lg border p-5">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Calendar className="h-4 w-4 text-muted-foreground" />
+            Calendly Link
           </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Spark will share this booking link when a visitor wants to
+            schedule a call.
+          </p>
+          <input
+            type="url"
+            value={calendlyLink}
+            onChange={(e) => {
+              setCalendlyLink(e.target.value);
+              checkDirty(selectedTz, e.target.value, hubspotKey);
+            }}
+            placeholder="https://calendly.com/your-team/meeting"
+            className="mt-3 h-9 w-full rounded-md border bg-background px-3 text-sm"
+          />
+        </div>
+
+        {/* HubSpot API Key */}
+        <div className="rounded-lg border p-5">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <Link2 className="h-4 w-4 text-muted-foreground" />
+            HubSpot Integration
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Connect HubSpot to automatically sync leads and conversation
+            summaries. Paste your Private App access token.
+          </p>
+          <input
+            type="password"
+            value={hubspotKey}
+            onChange={(e) => {
+              setHubspotKey(e.target.value);
+              checkDirty(selectedTz, calendlyLink, e.target.value);
+            }}
+            placeholder="pat-na1-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+            className="mt-3 h-9 w-full rounded-md border bg-background px-3 text-sm font-mono"
+          />
+          {hubspotKey && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Requires scopes: crm.objects.contacts.write,
+              crm.objects.contacts.read, crm.objects.notes.write
+            </p>
+          )}
+        </div>
+
+        {/* Save button */}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleSave}
+            disabled={!dirty || saveMutation.isPending}
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-50"
+          >
+            {saveMutation.isPending ? (
+              "Saving..."
+            ) : (
+              <>
+                <Check className="h-3.5 w-3.5" />
+                Save
+              </>
+            )}
+          </button>
+          {!dirty && (
+            <span className="text-xs text-muted-foreground">
+              All settings saved
+            </span>
+          )}
         </div>
       </div>
     </div>

@@ -171,6 +171,10 @@ async def update_settings(
                 detail=f"Invalid timezone: {body.timezone}",
             )
         updates["timezone"] = body.timezone
+    if body.calendly_link is not None:
+        updates["calendly_link"] = body.calendly_link
+    if body.hubspot_api_key is not None:
+        updates["hubspot_api_key"] = body.hubspot_api_key
 
     if not updates:
         # Nothing to change — return current profile

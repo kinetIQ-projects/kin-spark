@@ -128,6 +128,8 @@ class AdminSettingsUpdate(BaseModel):
     """Request body for PATCH /settings — partial settling_config update."""
 
     timezone: str | None = None
+    calendly_link: str | None = None
+    hubspot_api_key: str | None = None
 
 
 # =============================================================================

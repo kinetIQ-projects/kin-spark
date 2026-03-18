@@ -27,6 +27,7 @@ Conversation:
 {transcript}"""
 
 _HUBSPOT_CONTACTS_URL = "https://api.hubapi.com/crm/v3/objects/contacts"
+_HUBSPOT_NOTES_URL = "https://api.hubapi.com/crm/v3/objects/notes"
 _WEBHOOK_TIMEOUT = 10.0
 
 
@@ -94,12 +95,15 @@ def _split_name(full_name: str | None) -> tuple[str, str]:
 async def _hubspot_upsert_contact(
     api_key: str,
     lead_data: dict[str, Any],
-) -> None:
-    """Upsert a contact in HubSpot using email as the unique identifier."""
+) -> str | None:
+    """Upsert a contact in HubSpot using email as the unique identifier.
+
+    Returns the HubSpot contact ID on success, None on failure.
+    """
     email = lead_data.get("email")
     if not email:
         logger.warning("HubSpot sync skipped: no email on lead")
-        return
+        return None
 
     firstname, lastname = _split_name(lead_data.get("name"))
 
@@ -150,12 +154,57 @@ async def _hubspot_upsert_contact(
                 )
                 update_resp.raise_for_status()
                 logger.info("HubSpot contact updated: %s", contact_id)
+                return contact_id
             else:
                 logger.warning("HubSpot 409 but could not extract existing ID")
                 resp.raise_for_status()
+                return None
         else:
             resp.raise_for_status()
-            logger.info("HubSpot contact created for %s", email)
+            contact_id = resp.json().get("id")
+            logger.info("HubSpot contact created for %s (id=%s)", email, contact_id)
+            return contact_id
+
+
+async def _hubspot_create_note(
+    api_key: str,
+    contact_id: str,
+    note_body: str,
+) -> None:
+    """Create a note in HubSpot associated with a contact.
+
+    Uses inline association (associationTypeId 202 = note-to-contact).
+    Non-fatal — caller should catch exceptions.
+    """
+    payload: dict[str, Any] = {
+        "properties": {
+            "hs_note_body": note_body,
+        },
+        "associations": [
+            {
+                "to": {"id": contact_id},
+                "types": [
+                    {
+                        "associationCategory": "HUBSPOT_DEFINED",
+                        "associationTypeId": 202,
+                    }
+                ],
+            }
+        ],
+    }
+
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            _HUBSPOT_NOTES_URL,
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            timeout=_WEBHOOK_TIMEOUT,
+        )
+        resp.raise_for_status()
+        logger.info("HubSpot note created for contact %s", contact_id)
 
 
 async def _webhook_post(
@@ -254,7 +303,20 @@ async def sync_lead(
 
         if hubspot_key:
             try:
-                await _hubspot_upsert_contact(hubspot_key, lead_data)
+                contact_id = await _hubspot_upsert_contact(hubspot_key, lead_data)
+                # Create a note with conversation summary if we got a contact ID
+                if contact_id and lead_data.get("notes"):
+                    try:
+                        await _hubspot_create_note(
+                            hubspot_key, contact_id, lead_data["notes"]
+                        )
+                    except Exception as note_err:
+                        # Note failure is non-fatal — contact was already created
+                        logger.warning(
+                            "HubSpot note creation failed for contact %s: %s",
+                            contact_id,
+                            note_err,
+                        )
             except Exception as e:
                 errors.append(f"HubSpot: {e}")
 

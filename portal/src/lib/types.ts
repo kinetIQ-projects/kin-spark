@@ -96,6 +96,8 @@ export interface ClientProfile {
 
 export interface SettingsUpdate {
   timezone?: string;
+  calendly_link?: string;
+  hubspot_api_key?: string;
 }
 
 // ── Dashboard ───────────────────────────────────────────────────
