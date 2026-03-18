@@ -98,7 +98,7 @@
       styles.id = styleId;
       styles.textContent = `
         .spark-widget-container.spark-${isInline ? "inline" : "floating"} {
-          ${isInline ? "" : `
+          ${isInline ? "height: 100%;" : `
           position: fixed;
           ${config.position === "bottom-left" ? "left: 20px;" : "right: 20px;"}
           bottom: 20px;
