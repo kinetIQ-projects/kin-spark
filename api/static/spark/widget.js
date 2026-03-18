@@ -99,7 +99,11 @@
       styles.textContent = `
         .spark-widget-container.spark-${isInline ? "inline" : "floating"} {
           ${isInline ? `
-          height: 100%;
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
           display: flex;
           flex-direction: column;
           ` : `
@@ -137,9 +141,11 @@
         .spark-${isInline ? "inline" : "floating"} .spark-chat {
           ${isInline ? `
           display: flex;
-          width: 100%;
-          flex: 1;
-          min-height: 0;
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
           ` : `
           display: none;
           width: 380px;
