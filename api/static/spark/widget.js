@@ -176,6 +176,7 @@
         .spark-${isInline ? "inline" : "floating"} .spark-close:hover { opacity: 1; }
         .spark-${isInline ? "inline" : "floating"} .spark-messages {
           flex: 1;
+          min-height: 0;
           overflow-y: auto;
           padding: 16px;
           display: flex;
