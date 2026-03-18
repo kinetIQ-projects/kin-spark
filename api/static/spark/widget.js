@@ -98,7 +98,11 @@
       styles.id = styleId;
       styles.textContent = `
         .spark-widget-container.spark-${isInline ? "inline" : "floating"} {
-          ${isInline ? "height: 100%;" : `
+          ${isInline ? `
+          height: 100%;
+          display: flex;
+          flex-direction: column;
+          ` : `
           position: fixed;
           ${config.position === "bottom-left" ? "left: 20px;" : "right: 20px;"}
           bottom: 20px;
@@ -134,7 +138,8 @@
           ${isInline ? `
           display: flex;
           width: 100%;
-          height: 100%;
+          flex: 1;
+          min-height: 0;
           ` : `
           display: none;
           width: 380px;
