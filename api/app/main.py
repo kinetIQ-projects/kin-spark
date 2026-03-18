@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
@@ -163,7 +163,19 @@ app.include_router(
     tags=["Ingestion"],
 )
 
-# Serve widget static files
+# Serve widget.js with no-cache headers so deploys take effect immediately
+@app.get("/static/spark/widget.js")
+async def serve_widget_js() -> FileResponse:
+    return FileResponse(
+        "static/spark/widget.js",
+        media_type="application/javascript",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+        },
+    )
+
+# Serve remaining static files normally
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
