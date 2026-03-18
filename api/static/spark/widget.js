@@ -143,9 +143,9 @@
           max-height: calc(100vh - 100px);
           margin-bottom: 12px;
           `}
-          background: ${isInline ? "transparent" : "#fff"};
+          background: ${isInline ? "transparent" : "#1a1a2e"};
           border-radius: 12px;
-          ${isInline ? "" : "box-shadow: 0 8px 30px rgba(0,0,0,0.12);"}
+          ${isInline ? "" : "box-shadow: 0 8px 30px rgba(0,0,0,0.3);"}
           flex-direction: column;
           overflow: hidden;
         }
@@ -196,8 +196,8 @@
         }
         .spark-${isInline ? "inline" : "floating"} .spark-msg-assistant {
           align-self: flex-start;
-          background: ${isInline ? "rgba(255,255,255,0.1)" : "#f0f0f0"};
-          color: ${isInline ? "#e5e5e5" : "#1a1a1a"};
+          background: ${isInline ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.08)"};
+          color: ${isInline ? "#e5e5e5" : "#e0e0e0"};
           border-bottom-left-radius: 4px;
         }
         .spark-${isInline ? "inline" : "floating"} .spark-msg-assistant a {
@@ -207,7 +207,7 @@
         .spark-${isInline ? "inline" : "floating"} .spark-typing {
           align-self: flex-start;
           padding: 10px 14px;
-          background: ${isInline ? "rgba(255,255,255,0.1)" : "#f0f0f0"};
+          background: ${isInline ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.08)"};
           border-radius: 12px;
           border-bottom-left-radius: 4px;
           display: none;
@@ -218,7 +218,7 @@
           width: 6px;
           height: 6px;
           border-radius: 50%;
-          background: ${isInline ? "#888" : "#999"};
+          background: ${isInline ? "#888" : "#666"};
           margin: 0 2px;
           animation: spark-bounce 1.4s infinite;
         }
@@ -230,32 +230,28 @@
         }
         .spark-${isInline ? "inline" : "floating"} .spark-input-area {
           padding: 12px 16px;
-          border-top: 1px solid ${isInline ? "rgba(255,255,255,0.1)" : "#e5e5e5"};
+          border-top: 1px solid ${isInline ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.1)"};
           display: flex;
           gap: 8px;
         }
         .spark-${isInline ? "inline" : "floating"} .spark-input {
           flex: 1;
-          border: 1px solid ${isInline ? "rgba(255,255,255,0.2)" : "#ddd"};
+          border: 1px solid ${isInline ? "rgba(255,255,255,0.2)" : "rgba(255,255,255,0.15)"};
           border-radius: 8px;
           padding: 8px 12px;
           font-size: 14px;
           outline: none;
           font-family: inherit;
           resize: none;
-          ${isInline ? `
           background: rgba(255,255,255,0.05);
           color: #e5e5e5;
-          ` : ""}
         }
         .spark-${isInline ? "inline" : "floating"} .spark-input:focus {
           border-color: ${config.accent};
         }
-        ${isInline ? `
-        .spark-inline .spark-input::placeholder {
+        .spark-${isInline ? "inline" : "floating"} .spark-input::placeholder {
           color: rgba(255,255,255,0.4);
         }
-        ` : ""}
         .spark-${isInline ? "inline" : "floating"} .spark-send {
           background: ${config.accent};
           color: white;
@@ -273,24 +269,22 @@
         }
         .spark-${isInline ? "inline" : "floating"} .spark-lead-form {
           padding: 16px;
-          border-top: 1px solid ${isInline ? "rgba(255,255,255,0.1)" : "#e5e5e5"};
+          border-top: 1px solid rgba(255,255,255,0.1);
           display: none;
-          ${isInline ? "color: #e5e5e5;" : ""}
+          color: #e5e5e5;
         }
         .spark-${isInline ? "inline" : "floating"} .spark-lead-form.visible { display: block; }
         .spark-${isInline ? "inline" : "floating"} .spark-lead-form input {
           width: 100%;
-          border: 1px solid ${isInline ? "rgba(255,255,255,0.2)" : "#ddd"};
+          border: 1px solid rgba(255,255,255,0.15);
           border-radius: 8px;
           padding: 8px 12px;
           font-size: 14px;
           margin-bottom: 8px;
           font-family: inherit;
           box-sizing: border-box;
-          ${isInline ? `
           background: rgba(255,255,255,0.05);
           color: #e5e5e5;
-          ` : ""}
         }
         .spark-${isInline ? "inline" : "floating"} .spark-lead-form input:focus {
           border-color: ${config.accent};
@@ -310,7 +304,7 @@
         .spark-${isInline ? "inline" : "floating"} .spark-lead-skip {
           background: none;
           border: none;
-          color: #999;
+          color: rgba(255,255,255,0.4);
           cursor: pointer;
           font-size: 13px;
           padding: 8px 0 0;
@@ -603,11 +597,11 @@
       })
         .then(function () {
           leadForm.innerHTML =
-            '<div style="text-align:center;padding:8px;color:#666;">Thanks! We\'ll be in touch.</div>';
+            '<div style="text-align:center;padding:8px;color:rgba(255,255,255,0.6);">Thanks! We\'ll be in touch.</div>';
         })
         .catch(function () {
           leadForm.innerHTML =
-            '<div style="text-align:center;padding:8px;color:#c00;">Something went wrong. Please try again.</div>';
+            '<div style="text-align:center;padding:8px;color:#f87171;">Something went wrong. Please try again.</div>';
         });
     }
 
